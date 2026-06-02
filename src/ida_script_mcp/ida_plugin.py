@@ -30,6 +30,7 @@ except ImportError:
     HAS_IDA = False
 
 try:  # Package import used when this module is imported from ida_script_mcp.
+    from .change_protocol import ApplyChangesRequest, ApplyChangesResult, OperationApplyResult, fingerprint_from_metadata, fingerprint_matches
     from .execution import ScriptExecutor
     from .protocol import ExecuteRequest, ExecuteResult, ExecutionError
 except ImportError:  # pragma: no cover - standalone IDA plugin support-file import.
@@ -38,6 +39,13 @@ except ImportError:  # pragma: no cover - standalone IDA plugin support-file imp
         sys.path.insert(0, str(plugin_dir))
 
     try:
+        from ida_script_mcp_change_protocol import (  # type: ignore[no-redef]
+            ApplyChangesRequest,
+            ApplyChangesResult,
+            OperationApplyResult,
+            fingerprint_from_metadata,
+            fingerprint_matches,
+        )
         from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
         from ida_script_mcp_protocol import (  # type: ignore[no-redef]
             ExecuteRequest,
@@ -45,6 +53,13 @@ except ImportError:  # pragma: no cover - standalone IDA plugin support-file imp
             ExecutionError,
         )
     except ImportError:
+        from change_protocol import (  # type: ignore[no-redef]
+            ApplyChangesRequest,
+            ApplyChangesResult,
+            OperationApplyResult,
+            fingerprint_from_metadata,
+            fingerprint_matches,
+        )
         from execution import ScriptExecutor  # type: ignore[no-redef]
         from protocol import ExecuteRequest, ExecuteResult, ExecutionError  # type: ignore[no-redef]
 
@@ -53,6 +68,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13338
 MAX_PORT_RANGE = 100
 MAX_DISASSEMBLY_LINES = 1000
+UNSAFE_GUI_EXECUTE_ENV = "IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE"
 
 INSTANCE_INFO_FILE = Path.home() / ".ida_script_mcp_instances.json"
 INSTANCE_LOCK = threading.Lock()
@@ -483,6 +499,22 @@ def _collect_database_info() -> dict[str, Any]:
     except Exception:
         pass
     try:
+        info["input_file_path"] = idaapi.get_input_file_path()
+    except Exception:
+        pass
+    try:
+        info["root_filename"] = idaapi.get_root_filename()
+    except Exception:
+        pass
+    try:
+        info["dirty"] = bool(getattr(idaapi, "is_database_flag", lambda *_: False)(getattr(idaapi, "DBFL_KILL", -1)))
+    except Exception:
+        info["dirty"] = False
+    try:
+        info["unsaved"] = bool(getattr(idaapi, "is_database_modified", lambda: False)())
+    except Exception:
+        info["unsaved"] = False
+    try:
         info["imagebase"] = int(idaapi.get_imagebase())
     except Exception:
         pass
@@ -830,6 +862,75 @@ def get_xrefs_data(
     return result
 
 
+def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
+    op = operation.op
+    try:
+        if dry_run:
+            return OperationApplyResult(op_id=operation.op_id, op=op, status="skipped", message="dry run")
+        if op == "rename":
+            module = __import__("ida_name") if HAS_IDA else None
+            ok = module.set_name(operation.ea, operation.new_name, operation.flags) if module else True
+        elif op == "comment":
+            module = __import__("ida_bytes") if HAS_IDA else None
+            ok = module.set_cmt(operation.ea, operation.text, int(operation.repeatable)) if module else True
+        elif op == "function_comment":
+            module = __import__("ida_funcs") if HAS_IDA else None
+            ok = module.set_func_cmt(operation.ea, operation.text, int(operation.repeatable)) if module else True
+        elif op == "patch_bytes":
+            module = __import__("ida_bytes") if HAS_IDA else None
+            ok = module.patch_bytes(operation.ea, bytes.fromhex(operation.new_bytes_hex)) if module else True
+        elif op == "set_type":
+            module = __import__("idc") if HAS_IDA else None
+            setter = getattr(module, "set_type", None) or getattr(module, "SetType", None) if module else None
+            ok = setter(operation.ea, operation.decl) if setter else True
+        else:
+            return OperationApplyResult(op_id=operation.op_id, op=op, status="error", message="unsupported operation")
+        if not ok:
+            return OperationApplyResult(op_id=operation.op_id, op=op, status="error", message="IDA API returned failure")
+        return OperationApplyResult(op_id=operation.op_id, op=op, status="applied", message="applied")
+    except Exception as exc:
+        return OperationApplyResult(op_id=operation.op_id, op=op, status="error", message=str(exc))
+
+
+def apply_changes_request(payload: dict[str, Any]) -> dict[str, Any]:
+    request = ApplyChangesRequest.model_validate(payload)
+    current_fingerprint = fingerprint_from_metadata(_collect_database_info())
+    if not fingerprint_matches(request.database_fingerprint, current_fingerprint):
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="database fingerprint mismatch",
+        ).model_dump(mode="json")
+
+    applied = []
+    skipped = []
+    errors = []
+    for operation in request.operations:
+        result = _execute_change_operation(operation, dry_run=request.dry_run)
+        if result.status == "applied":
+            applied.append(result)
+        elif result.status == "skipped":
+            skipped.append(result)
+        else:
+            errors.append(result)
+            if not request.dry_run:
+                break
+    status = "ok" if not errors else ("partial" if applied or skipped else "error")
+    return ApplyChangesResult(
+        status=status,
+        job_id=request.job_id,
+        dry_run=request.dry_run,
+        applied=applied,
+        skipped=skipped,
+        errors=errors,
+    ).model_dump(mode="json")
+
+
+def _unsafe_gui_execute_enabled() -> bool:
+    return os.environ.get(UNSAFE_GUI_EXECUTE_ENV) == "1"
+
+
 class IdaScriptHttpHandler(BaseHTTPRequestHandler):
     """HTTP request handler for IDA Script MCP."""
 
@@ -905,31 +1006,31 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/execute":
+                if not _unsafe_gui_execute_enabled():
+                    self._send_json_response(410, {
+                        "status": "rejected",
+                        "error": "GUI /execute is disabled by default; use isolated worker execution.",
+                    })
+                    return
                 try:
                     execute_request = ExecuteRequest.model_validate(request_data)
                 except Exception as exc:
                     self._send_json_response(400, _source_error_payload(exc))
                     return
-
                 try:
                     result = execution_manager.run(execute_request)
                 except ExecutionBusyError as exc:
-                    busy_result = ExecuteResult(
-                        status="busy",
-                        result=None,
-                        stdout="",
-                        stderr="",
-                        error=ExecutionError(
-                            type=type(exc).__name__,
-                            message=str(exc),
-                            traceback=None,
-                        ),
-                        timeout_seconds=execute_request.timeout_seconds,
-                    )
-                    self._send_json_response(409, _execute_result_payload(busy_result))
+                    self._send_json_response(409, {"status": "rejected", "error": str(exc)})
                     return
-
                 self._send_json_response(200, _execute_result_payload(result))
+                return
+
+            if parsed.path == "/apply_changes":
+                try:
+                    result = execute_on_main_thread(apply_changes_request, request_data, write=True)
+                    self._send_json_response(200, result)
+                except Exception as exc:
+                    self._send_json_response(400, {"status": "error", "error": str(exc)})
                 return
 
             if parsed.path == "/functions":
@@ -1044,7 +1145,8 @@ if HAS_IDA:
                     print(f"[{PLUGIN_NAME}] Functions endpoint: POST http://{self.host}:{port}/functions")
                     print(f"[{PLUGIN_NAME}] Decompile endpoint: POST http://{self.host}:{port}/decompile")
                     print(f"[{PLUGIN_NAME}] Xrefs endpoint: POST http://{self.host}:{port}/xrefs")
-                    print(f"[{PLUGIN_NAME}] Execute endpoint: POST http://{self.host}:{port}/execute")
+                    print(f"[{PLUGIN_NAME}] Execute endpoint disabled by default; use isolated worker execution")
+                    print(f"[{PLUGIN_NAME}] Apply changes endpoint: POST http://{self.host}:{port}/apply_changes")
                     return
                 except OSError as exc:
                     if exc.errno in (48, 98, 10048):

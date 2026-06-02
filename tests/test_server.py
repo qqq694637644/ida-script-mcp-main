@@ -25,7 +25,6 @@ from ida_script_mcp.server import (
     DecompileFunctionInput,
     ExecuteScriptInput,
     GetXrefsInput,
-    IdaPluginResponseTimeout,
     ListFunctionsInput,
     execute_idapython,
     find_instance_port,
@@ -121,32 +120,49 @@ class TestReadToolInputs:
 
 
 class TestExecuteIdapython:
-    """Tests for server-side execute_idapython transport semantics."""
+    """Tests for isolated public execute_idapython routing."""
 
-    def test_plugin_response_timeout_status(self, monkeypatch):
+    def test_public_execute_uses_metadata_and_isolated_manager_not_gui_execute(self, monkeypatch):
+        calls = []
+
         monkeypatch.setattr(
             "ida_script_mcp.server.resolve_target",
             lambda _params: (13338, "sample.exe", "sample.exe"),
         )
 
-        def raise_timeout(*_args, **kwargs):
-            raise IdaPluginResponseTimeout("127.0.0.1", 13338, kwargs["timeout"])
+        def fake_make_ida_request(endpoint, **kwargs):
+            calls.append((endpoint, kwargs))
+            assert endpoint != "/execute"
+            assert endpoint == "/metadata"
+            return {"database_path": __file__, "dirty": False, "unsaved": False}
 
-        monkeypatch.setattr("ida_script_mcp.server.make_ida_request", raise_timeout)
+        class FakeManager:
+            def execute(self, request, *, gui_context, instance_id, port, collect_changes=True):
+                from ida_script_mcp.protocol import ExecuteResult
 
-        result = asyncio.run(
-            execute_idapython(ExecuteScriptInput(code="while True:\n    pass", timeout_seconds=1))
-        )
+                assert request.code == "result = 1"
+                assert gui_context["database_path"] == __file__
+                assert instance_id == "sample.exe"
+                assert port == 13338
+                assert collect_changes is True
+                return ExecuteResult(status="worker_start_error", error={"type": "test", "message": "no ida"})
 
-        assert result["status"] == "plugin_response_timeout"
-        assert result["result"] is None
-        assert result["stdout"] == ""
-        assert result["stderr"] == ""
-        assert result["timeout_seconds"] == 1
-        assert result["instance_id"] == "sample.exe"
-        assert result["port"] == 13338
-        assert result["error"]["type"] == "PluginResponseTimeout"
-        assert "may still be running inside IDA" in result["error"]["message"]
+        monkeypatch.setattr("ida_script_mcp.server.make_ida_request", fake_make_ida_request)
+        monkeypatch.setattr("ida_script_mcp.server.IsolatedExecutionManager", lambda: FakeManager())
+
+        result = asyncio.run(execute_idapython(ExecuteScriptInput(code="result = 1")))
+
+        assert calls and calls[0][0] == "/metadata"
+        assert result["status"] == "worker_start_error"
+        assert result["isolated"] is True
+
+    def test_execute_input_rejects_public_apply_changes_field(self):
+        with pytest.raises(ValidationError):
+            ExecuteScriptInput.model_validate({"code": "1", "apply_changes": True})
+
+    def test_execute_input_rejects_public_isolation_field(self):
+        with pytest.raises(ValidationError):
+            ExecuteScriptInput.model_validate({"code": "1", "isolation": "in_process"})
 
 
 class TestConfiguration:

@@ -11,8 +11,8 @@ local IDA-Script-MCP plugin and exposes a small, high-signal tool surface:
 - ``execute_idapython``
 
 The design intentionally keeps common reverse-engineering reads as dedicated
-read-only tools while preserving ``execute_idapython`` as an escape hatch for
-long-tail workflows.
+read-only tools while running public ``execute_idapython`` through an isolated
+IDA worker process.
 """
 
 from __future__ import annotations
@@ -32,11 +32,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from .protocol import (
     DEFAULT_EXECUTE_TIMEOUT_SECONDS,
     MAX_EXECUTE_TIMEOUT_SECONDS,
-    PLUGIN_RESPONSE_TIMEOUT_MARGIN_SECONDS,
     ExecuteRequest,
     ExecuteResult,
     ExecutionError,
 )
+from .isolated_manager import IsolatedExecutionManager
+from .change_protocol import ApplyChangesRequest
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -228,10 +229,11 @@ class ExecuteScriptInput(InstanceTargetInput):
         default=DEFAULT_EXECUTE_TIMEOUT_SECONDS,
         ge=1,
         le=MAX_EXECUTE_TIMEOUT_SECONDS,
-        description=(
-            "Soft Python-bytecode timeout for the script. Native IDA/C extension calls may "
-            "not be interruptible until control returns to Python."
-        ),
+        description="Hard timeout for the isolated IDA worker process.",
+    )
+    collect_changes: StrictBool = Field(
+        default=True,
+        description="Whether the isolated worker records structured GUI replay changes.",
     )
 
     @model_validator(mode="after")
@@ -683,58 +685,76 @@ async def get_xrefs(params: GetXrefsInput) -> dict[str, Any]:
     },
 )
 async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
-    """Execute Python code or a Python script file inside IDA.
+    """Execute Python code in an isolated IDA worker process.
 
-    This is the escape hatch for long-tail workflows that are not covered by the
-    dedicated read-only tools. It can modify the IDA database.
-
-    Examples:
-        - ``execute_idapython({"code": "print(hex(idaapi.get_imagebase()))"})``
-        - ``execute_idapython({"code": "result = len(list(idautils.Functions()))"})``
-        - ``execute_idapython({"script_path": "./scripts/rename_stubs.py", "instance_id": "sample.exe"})``
+    Public execution never falls back to the GUI ``/execute`` endpoint. The GUI
+    plugin is queried only for safe metadata such as the current saved database
+    path and dirty state.
     """
     port, resolved_instance_id, label = resolve_target(params)
     if port is None:
         return _tool_error(label, hint=DEFAULT_ERROR_HINT)
 
     execute_request = params.to_execute_request()
-    plugin_response_timeout = (
-        float(execute_request.timeout_seconds) + PLUGIN_RESPONSE_TIMEOUT_MARGIN_SECONDS
-    )
-    started_at = time.monotonic()
+    try:
+        gui_context = make_ida_request("/metadata", method="GET", port=port, timeout=10.0)
+    except Exception as exc:
+        return ExecuteResult(
+            status="source_error",
+            result=None,
+            stdout="",
+            stderr="",
+            error=ExecutionError(type=type(exc).__name__, message=str(exc), traceback=None),
+            timeout_seconds=execute_request.timeout_seconds,
+            instance_id=resolved_instance_id,
+            port=port,
+            isolated=True,
+        ).model_dump(mode="json")
 
+    manager = IsolatedExecutionManager()
+    result = manager.execute(
+        execute_request,
+        gui_context=gui_context,
+        instance_id=resolved_instance_id,
+        port=port,
+        collect_changes=params.collect_changes,
+    )
+    return result.model_dump(mode="json")
+
+
+class ApplyWorkerChangesInput(ApplyChangesRequest):
+    """Input for apply_worker_changes; dry_run defaults to true."""
+
+    instance_id: Optional[str] = None
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+
+
+@mcp.tool(
+    name="apply_worker_changes",
+    annotations={
+        "title": "Apply Worker Changes",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def apply_worker_changes(params: ApplyWorkerChangesInput) -> dict[str, Any]:
+    """Preview or apply a worker ChangeSet through the GUI plugin."""
+    port, resolved_instance_id, label = resolve_target(params)
+    if port is None:
+        return _tool_error(label, hint=DEFAULT_ERROR_HINT)
     try:
         result = make_ida_request(
-            "/execute",
+            "/apply_changes",
             method="POST",
-            data=execute_request.model_dump(),
+            data=params.model_dump(mode="json", exclude={"instance_id", "port"}),
             port=port,
-            timeout=plugin_response_timeout,
+            timeout=30.0,
         )
         result.setdefault("instance_id", resolved_instance_id)
         result.setdefault("port", port)
         return result
-    except IdaPluginResponseTimeout:
-        duration_seconds = max(0.0, time.monotonic() - started_at)
-        return ExecuteResult(
-            status="plugin_response_timeout",
-            result=None,
-            stdout="",
-            stderr="",
-            error=ExecutionError(
-                type="PluginResponseTimeout",
-                message=(
-                    "IDA plugin did not respond within "
-                    f"{plugin_response_timeout:g} seconds. The script may still be "
-                    "running inside IDA."
-                ),
-                traceback=None,
-            ),
-            duration_seconds=duration_seconds,
-            timeout_seconds=execute_request.timeout_seconds,
-            instance_id=resolved_instance_id,
-            port=port,
-        ).model_dump(mode="json")
     except Exception as exc:
         return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
 

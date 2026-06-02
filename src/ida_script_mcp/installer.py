@@ -45,6 +45,8 @@ IDA_PLUGIN_FILE = os.path.join(SCRIPT_DIR, "ida_plugin.py")
 IDA_PLUGIN_SUPPORT_FILES = {
     "protocol.py": "ida_script_mcp_protocol.py",
     "execution.py": "ida_script_mcp_execution.py",
+    "change_protocol.py": "ida_script_mcp_change_protocol.py",
+    "change_recorder.py": "ida_script_mcp_change_recorder.py",
 }
 SERVER_MODULE = "ida_script_mcp.server"
 

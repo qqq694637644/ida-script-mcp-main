@@ -145,14 +145,20 @@ module references.
 
 ### Security note
 
-`execute_idapython` can run arbitrary Python code inside IDA and can modify the
-IDA database. Only use it with trusted assistants and keep the plugin bound to
-localhost.
+`execute_idapython` runs arbitrary Python through an isolated worker IDA
+process. The GUI plugin is used only for safe metadata and structured change
+replay; public execution never falls back to GUI `/execute`.
+
+Set `IDA_SCRIPT_MCP_IDA_PATH` to `idat`, `idat64`, `ida`, or `ida64` before
+using isolated execution. The current GUI database must be saved and clean; dirty
+or unsaved state is rejected instead of auto-saved.
 
 Script execution returns an explicit `status` such as `ok`, `timeout`,
-`script_error`, or `source_error`. A `plugin_response_timeout` means the MCP
-server stopped waiting for the IDA plugin response; the script may still be
-running inside IDA, especially if it is blocked inside native IDA/C code.
+`script_error`, `source_error`, `worker_start_error`, `worker_crashed`,
+`worker_result_missing`, `recorder_error`, or `rejected`. A hard timeout kills the
+worker process tree and returns `killed=true`; generated changes are not applied
+to the GUI database unless `apply_worker_changes(..., dry_run=false)` is called
+explicitly after preview.
 
 ### License
 

@@ -6,9 +6,16 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
+try:
+    from .change_protocol import ChangeOperation
+except ImportError:  # pragma: no cover - IDA plugin support-file import fallback.
+    try:
+        from ida_script_mcp_change_protocol import ChangeOperation  # type: ignore[no-redef]
+    except ImportError:
+        from change_protocol import ChangeOperation  # type: ignore[no-redef]
+
 DEFAULT_EXECUTE_TIMEOUT_SECONDS = 30
 MAX_EXECUTE_TIMEOUT_SECONDS = 600
-PLUGIN_RESPONSE_TIMEOUT_MARGIN_SECONDS = 5
 EXECUTE_FILENAME = "<ida-script-mcp-execute>"
 
 ExecuteStatus = Literal[
@@ -16,13 +23,16 @@ ExecuteStatus = Literal[
     "timeout",
     "script_error",
     "source_error",
-    "busy",
-    "plugin_response_timeout",
+    "worker_crashed",
+    "worker_start_error",
+    "worker_result_missing",
+    "recorder_error",
+    "rejected",
 ]
 
 
 class ExecuteRequest(BaseModel):
-    """Strict request body for the IDA plugin ``/execute`` endpoint."""
+    """Strict request body for IDAPython execution."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -55,7 +65,7 @@ class ExecutionError(BaseModel):
 
 
 class ExecuteResult(BaseModel):
-    """Structured result returned by script execution."""
+    """Structured result returned by isolated script execution."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -68,3 +78,11 @@ class ExecuteResult(BaseModel):
     timeout_seconds: int = Field(default=DEFAULT_EXECUTE_TIMEOUT_SECONDS, ge=1)
     instance_id: Optional[str] = None
     port: Optional[int] = None
+    isolated: bool = True
+    job_id: Optional[str] = None
+    worker_pid: Optional[int] = None
+    worker_exit_code: Optional[int] = None
+    killed: bool = False
+    hard_timeout: bool = False
+    changes: list[ChangeOperation] = Field(default_factory=list)
+    artifacts: dict[str, str] = Field(default_factory=dict)

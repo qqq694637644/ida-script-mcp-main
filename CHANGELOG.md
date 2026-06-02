@@ -1,4 +1,12 @@
 # Changelog
+## V2.3 isolated execution plan implementation
+
+- Changed public `execute_idapython` routing to use an isolated worker process only.
+- Disabled GUI `/execute` by default behind `IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE=1`.
+- Added strict worker status values, job protocol, process-tree hard timeout handling, and structured change capture/replay models.
+- Added GUI `/apply_changes` plus MCP `apply_worker_changes`, defaulting to dry-run.
+- Added unit coverage for protocol validation, GUI execute rejection, change recording, and isolated process-manager outcomes.
+
 
 All notable changes to this project will be documented in this file.
 
