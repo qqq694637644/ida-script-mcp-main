@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from ida_script_mcp.change_recorder import ChangeRecorder, McpChangesApi
+from ida_script_mcp.change_recorder import ChangeRecorder, McpChangesApi, RecorderError
 
 
 def test_monkeypatch_records_success_and_preserves_return_value():
@@ -99,3 +99,13 @@ def test_explicit_mcp_changes_suppresses_underlying_monkeypatch_recording():
     assert len(recorder.operations) == 1
     assert recorder.operations[0].op == "rename"
     assert recorder.operations[0].source == "explicit_api"
+
+
+def test_explicit_mcp_changes_missing_module_raises_recorder_error():
+    recorder = ChangeRecorder()
+    api = McpChangesApi(recorder, {})
+
+    with pytest.raises(RecorderError, match="ida_name"):
+        api.rename(0x1000, "entry")
+
+    assert recorder.operations == []

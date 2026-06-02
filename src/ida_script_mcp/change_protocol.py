@@ -125,31 +125,14 @@ class ApplyChangesResult(BaseModel):
 def fingerprint_matches(expected: DatabaseFingerprint, actual: DatabaseFingerprint) -> bool:
     """Return whether two fingerprints are strong enough for safe replay.
 
-    Saved IDB/I64 database hashes are authoritative for replay. If either side
-    has a saved-database hash, both sides must have the same hash; never fall
-    back to input-file identity after a database-hash mismatch or absence.
+    Saved IDB/I64 database hashes are the only authoritative replay identity in
+    V2.3. Missing, mismatched, or input-only identities must fail closed.
     """
-    if expected.database_sha256 or actual.database_sha256:
-        return (
-            expected.database_sha256 is not None
-            and actual.database_sha256 is not None
-            and expected.database_sha256 == actual.database_sha256
-        )
-
-    if expected.input_sha256 and actual.input_sha256:
-        return expected.input_sha256 == actual.input_sha256
-
-    if expected.input_md5 and actual.input_md5:
-        return (
-            expected.input_md5 == actual.input_md5
-            and expected.root_filename == actual.root_filename
-            and expected.imagebase == actual.imagebase
-        )
-
-    if expected.copied_database_lineage and actual.copied_database_lineage:
-        return expected.copied_database_lineage == actual.copied_database_lineage
-
-    return False
+    return (
+        expected.database_sha256 is not None
+        and actual.database_sha256 is not None
+        and expected.database_sha256 == actual.database_sha256
+    )
 
 
 def fingerprint_from_metadata(metadata: dict[str, Any]) -> DatabaseFingerprint:

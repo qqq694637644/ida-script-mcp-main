@@ -87,6 +87,8 @@ def run(request_path: Path) -> int:
 
     try:
         result = ScriptExecutor(lambda: namespace).execute(request.execute)
+        if result.status == "script_error" and result.error and result.error.type == "RecorderError":
+            result = result.model_copy(update={"status": "recorder_error"})
     except RecorderError as exc:
         result = ExecuteResult(
             status="recorder_error",

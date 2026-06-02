@@ -603,9 +603,20 @@ def _collect_database_info() -> dict[str, Any]:
     if dirty_error:
         info["dirty_error"] = dirty_error
 
-    if saved_db_path:
-        info["database_sha256"] = _sha256_file(saved_db_path)
-        info["database_size"] = _file_size(saved_db_path)
+    if not saved_db_path:
+        info["database_identity_known"] = False
+        info["database_identity_error"] = "saved IDB/I64 database path is unavailable"
+    else:
+        database_sha256 = _sha256_file(saved_db_path)
+        if not database_sha256:
+            info["database_identity_known"] = False
+            info["database_identity_error"] = (
+                f"failed to compute SHA-256 for saved database: {saved_db_path}"
+            )
+        else:
+            info["database_sha256"] = database_sha256
+            info["database_size"] = _file_size(saved_db_path)
+            info["database_identity_known"] = True
 
     if not HAS_IDA:
         return info
@@ -969,6 +980,16 @@ def apply_changes_request(payload: dict[str, Any]) -> dict[str, Any]:
             job_id=request.job_id,
             dry_run=request.dry_run,
             message="database has unsaved changes; save before replaying worker changes",
+        ).model_dump(mode="json")
+    if (
+        current_metadata.get("database_identity_known") is False
+        or not current_metadata.get("database_sha256")
+    ):
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="saved database SHA-256 is unavailable; refusing change replay",
         ).model_dump(mode="json")
 
     current_fingerprint = fingerprint_from_metadata(current_metadata)

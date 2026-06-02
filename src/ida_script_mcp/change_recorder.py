@@ -176,37 +176,46 @@ class McpChangesApi:
         self.recorder = recorder
         self.modules = modules
 
+    def _required_api(self, module_name: str, function_name: str):
+        module = self.modules.get(module_name)
+        if module is None:
+            raise RecorderError(f"Required IDAPython module is unavailable: {module_name}")
+        function = getattr(module, function_name, None)
+        if function is None:
+            raise RecorderError(f"Required IDAPython API is unavailable: {module_name}.{function_name}")
+        return function
+
     def rename(self, ea: int, name: str, flags: int = 0):
-        module = self.modules.get("ida_name") or self.modules.get("idc")
+        set_name = self._required_api("ida_name", "set_name")
         with self.recorder.suppress_recording():
-            ok = True if module is None or not hasattr(module, "set_name") else module.set_name(ea, name, flags)
+            ok = set_name(ea, name, flags)
         if not ok:
             return ok
         self.recorder.rename(ea, name, flags=flags)
         return ok
 
     def comment(self, ea: int, text: str, repeatable: bool = False):
-        module = self.modules.get("ida_bytes") or self.modules.get("idc")
+        set_cmt = self._required_api("ida_bytes", "set_cmt")
         with self.recorder.suppress_recording():
-            ok = True if module is None or not hasattr(module, "set_cmt") else module.set_cmt(ea, text, int(repeatable))
+            ok = set_cmt(ea, text, int(repeatable))
         if not ok:
             return ok
         self.recorder.comment(ea, text, repeatable=repeatable)
         return ok
 
     def function_comment(self, ea: int, text: str, repeatable: bool = False):
-        module = self.modules.get("ida_funcs") or self.modules.get("idc")
+        set_func_cmt = self._required_api("ida_funcs", "set_func_cmt")
         with self.recorder.suppress_recording():
-            ok = True if module is None or not hasattr(module, "set_func_cmt") else module.set_func_cmt(ea, text, int(repeatable))
+            ok = set_func_cmt(ea, text, int(repeatable))
         if not ok:
             return ok
         self.recorder.function_comment(ea, text, repeatable=repeatable)
         return ok
 
     def patch_bytes(self, ea: int, data: bytes | bytearray | str):
-        module = self.modules.get("ida_bytes")
+        patch_bytes = self._required_api("ida_bytes", "patch_bytes")
         with self.recorder.suppress_recording():
-            ok = True if module is None or not hasattr(module, "patch_bytes") else module.patch_bytes(ea, data)
+            ok = patch_bytes(ea, data)
         if not ok:
             return ok
         self.recorder.patch_bytes(ea, data)
@@ -214,9 +223,13 @@ class McpChangesApi:
 
     def set_type(self, ea: int, decl: str, flags: int = 0):
         module = self.modules.get("idc")
-        func = getattr(module, "set_type", None) or getattr(module, "SetType", None) if module is not None else None
+        if module is None:
+            raise RecorderError("Required IDAPython module is unavailable: idc")
+        func = getattr(module, "set_type", None) or getattr(module, "SetType", None)
+        if func is None:
+            raise RecorderError("Required IDAPython API is unavailable: idc.set_type/SetType")
         with self.recorder.suppress_recording():
-            ok = True if func is None else func(ea, decl)
+            ok = func(ea, decl)
         if not ok:
             return ok
         self.recorder.set_type(ea, decl, flags=flags)

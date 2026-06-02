@@ -60,6 +60,28 @@ def test_collect_database_info_marks_dirty_unknown_on_api_failure(monkeypatch, t
     assert "cannot tell" in info["dirty_error"]
 
 
+def test_collect_database_info_marks_database_hash_failure_unknown(monkeypatch, tmp_path):
+    saved_db = tmp_path / "sample.i64"
+    saved_db.write_bytes(b"ida database")
+    fake_idaapi = types.SimpleNamespace(
+        PATH_TYPE_IDB=1,
+        get_path=lambda _path_type: str(saved_db),
+        get_input_file_path=lambda: "input.exe",
+        is_database_modified=lambda: False,
+        get_root_filename=lambda: "sample.exe",
+        get_imagebase=lambda: 0x400000,
+        get_inf_structure=lambda: None,
+    )
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(ida_plugin, "idaapi", fake_idaapi, raising=False)
+    monkeypatch.setattr(ida_plugin, "_sha256_file", lambda _path: None)
+
+    info = ida_plugin._collect_database_info()
+
+    assert info["database_identity_known"] is False
+    assert "failed to compute SHA-256" in info["database_identity_error"]
+
+
 def _apply_payload(database_sha256: str = "abc") -> dict:
     return {
         "schema_version": 1,
@@ -122,3 +144,21 @@ def test_apply_changes_allows_clean_dry_run_with_matching_fingerprint(monkeypatc
 
     assert result["status"] == "ok"
     assert result["dry_run"] is True
+
+
+def test_apply_changes_rejects_missing_database_identity(monkeypatch):
+    monkeypatch.setattr(
+        ida_plugin,
+        "_collect_database_info",
+        lambda: {
+            "dirty_state_known": True,
+            "dirty": False,
+            "unsaved": False,
+            "database_identity_known": False,
+        },
+    )
+
+    result = ida_plugin.apply_changes_request(_apply_payload("abc"))
+
+    assert result["status"] == "rejected"
+    assert "SHA-256 is unavailable" in result["message"]

@@ -85,6 +85,29 @@ def test_unknown_dirty_state_is_rejected_without_launch(tmp_path):
     assert launched is False
 
 
+def test_missing_database_identity_is_source_error_without_launch(tmp_path):
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    launched = False
+
+    def popen(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
+        return FakeProcess()
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen)
+    result = manager.execute(
+        ExecuteRequest(code="1"),
+        gui_context=_gui_context(db, database_identity_known=False),
+        instance_id="sample",
+        port=1,
+    )
+
+    assert result.status == "source_error"
+    assert result.error.type == "DatabaseIdentityUnavailable"
+    assert launched is False
+
+
 def test_missing_ida_path_returns_worker_start_error(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")

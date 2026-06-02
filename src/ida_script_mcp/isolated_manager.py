@@ -131,10 +131,32 @@ class IsolatedExecutionManager:
                 port=port,
                 job_id=job_id,
             )
+        if gui_context.get("database_identity_known") is False:
+            return self._failure(
+                "source_error",
+                request,
+                started,
+                "DatabaseIdentityUnavailable",
+                "Saved database SHA-256 is unavailable; refusing isolated execution.",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
         if not gui_context.get("database_sha256"):
             gui_context = dict(gui_context)
             gui_context["database_sha256"] = _sha256_file(database_path)
             gui_context["database_size"] = database_path.stat().st_size
+        if not gui_context.get("database_sha256"):
+            return self._failure(
+                "source_error",
+                request,
+                started,
+                "DatabaseIdentityUnavailable",
+                "Failed to compute saved database SHA-256; refusing isolated execution.",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
 
         ida_path = self.ida_path or _discover_ida_path()
         if ida_path is None or not ida_path.exists():

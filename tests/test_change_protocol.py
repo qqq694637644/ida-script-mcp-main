@@ -48,10 +48,10 @@ def test_unknown_change_fields_rejected():
 
 
 def test_fingerprint_matching_requires_strong_identity():
-    assert fingerprint_matches(
+    assert not fingerprint_matches(
         DatabaseFingerprint(input_sha256="a"), DatabaseFingerprint(input_sha256="a")
     )
-    assert fingerprint_matches(
+    assert not fingerprint_matches(
         DatabaseFingerprint(input_md5="m", root_filename="x", imagebase=1),
         DatabaseFingerprint(input_md5="m", root_filename="x", imagebase=1),
     )
@@ -70,6 +70,13 @@ def test_database_hash_is_authoritative_for_replay_identity():
     )
     assert not fingerprint_matches(
         DatabaseFingerprint(input_sha256="same-input", database_sha256="old-idb"),
+        DatabaseFingerprint(input_sha256="same-input"),
+    )
+
+
+def test_input_only_fingerprint_is_not_replay_identity():
+    assert not fingerprint_matches(
+        DatabaseFingerprint(input_sha256="same-input"),
         DatabaseFingerprint(input_sha256="same-input"),
     )
 
