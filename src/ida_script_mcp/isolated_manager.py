@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -19,6 +20,18 @@ from .process_utils import kill_process_tree
 from .protocol import ExecuteRequest, ExecuteResult, ExecutionError
 
 HARD_TIMEOUT_MARGIN_SECONDS = 5
+
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    try:
+        hasher = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+        return hasher.hexdigest()
+    except Exception:
+        return None
 
 
 def _json_dump_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -79,16 +92,49 @@ class IsolatedExecutionManager:
     ) -> ExecuteResult:
         started = time.monotonic()
         job_id = f"job-{uuid.uuid4().hex}"
+        if gui_context.get("dirty_state_known") is False or gui_context.get("dirty") is None:
+            return self._failure(
+                "rejected",
+                request,
+                started,
+                "GuiDatabaseDirtyStateUnknown",
+                "GUI database dirty state is unknown; refusing isolated execution.",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
         dirty = bool(gui_context.get("dirty") or gui_context.get("unsaved"))
         if dirty:
-            return self._failure("rejected", request, started, "GuiDatabaseDirty", "GUI database has unsaved changes; save the database before isolated execution.", instance_id=instance_id, port=port, job_id=job_id)
+            return self._failure(
+                "rejected",
+                request,
+                started,
+                "GuiDatabaseDirty",
+                "GUI database has unsaved changes; save the database before isolated execution.",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
 
         database_path_value = gui_context.get("database_path")
         if not database_path_value:
             return self._failure("source_error", request, started, "MissingDatabasePath", "GUI plugin did not report a saved database_path.", instance_id=instance_id, port=port, job_id=job_id)
         database_path = Path(str(database_path_value))
         if not database_path.exists() or not database_path.is_file():
-            return self._failure("source_error", request, started, "DatabaseSourceUnavailable", f"Saved database path is not readable: {database_path}", instance_id=instance_id, port=port, job_id=job_id)
+            return self._failure(
+                "source_error",
+                request,
+                started,
+                "DatabaseSourceUnavailable",
+                f"Saved database path is not readable: {database_path}",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
+        if not gui_context.get("database_sha256"):
+            gui_context = dict(gui_context)
+            gui_context["database_sha256"] = _sha256_file(database_path)
+            gui_context["database_size"] = database_path.stat().st_size
 
         ida_path = self.ida_path or _discover_ida_path()
         if ida_path is None or not ida_path.exists():

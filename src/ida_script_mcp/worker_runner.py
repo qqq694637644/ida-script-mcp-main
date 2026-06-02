@@ -51,17 +51,17 @@ def _build_worker_globals(recorder: ChangeRecorder) -> dict[str, Any]:
         "ida_funcs": _lazy_import("ida_funcs"),
         "ida_typeinf": _lazy_import("ida_typeinf"),
     }
-    recorder.install(modules)
+    recorder.install(modules, patch_explicit_api_modules=False)
     namespace = {"__builtins__": __builtins__, **modules}
     namespace["mcp_changes"] = McpChangesApi(recorder, modules)
     return namespace
 
 
 def _worker_metadata(request: IsolatedExecuteRequest) -> dict[str, Any]:
-    metadata = dict(request.context)
-    metadata["database_path"] = request.database_copy_path
-    metadata["copied_database_lineage"] = request.job_id
-    return metadata
+    # Changes must be replayable against the GUI database that produced this
+    # worker job, not against the transient copied database path. Preserve the
+    # original GUI fingerprint from request.context.
+    return dict(request.context)
 
 
 def run(request_path: Path) -> int:

@@ -8,6 +8,7 @@ LLMs do not need to synthesize IDAPython for every common workflow.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -478,14 +479,133 @@ def _resolve_function(address: Optional[str] = None, name: Optional[str] = None)
     return func, ea, None
 
 
+
+
+def _path_from_ida_path_type(path_type_name: str) -> Optional[str]:
+    if not HAS_IDA:
+        return None
+    modules = [idaapi]
+    try:
+        modules.append(__import__("ida_loader"))
+    except Exception:
+        pass
+
+    for module in modules:
+        getter = getattr(module, "get_path", None)
+        path_type = getattr(module, path_type_name, None)
+        if getter is None or path_type is None:
+            continue
+        try:
+            value = getter(path_type)
+        except Exception:
+            continue
+        if value:
+            return str(value)
+    return None
+
+
+def _saved_database_path() -> Optional[str]:
+    """Return the saved IDB/I64 path, never the original input sample path."""
+    if not HAS_IDA:
+        return None
+    for path_type_name in ("PATH_TYPE_IDB", "PATH_TYPE_ID0"):
+        value = _path_from_ida_path_type(path_type_name)
+        if value:
+            return value
+    return None
+
+
+def _input_file_path() -> Optional[str]:
+    if not HAS_IDA:
+        return None
+    try:
+        value = idaapi.get_input_file_path()
+    except Exception:
+        return None
+    return str(value) if value else None
+
+
+def _sha256_file(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    try:
+        hasher = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
+
+def _file_size(path: Optional[str]) -> Optional[int]:
+    if not path:
+        return None
+    try:
+        return int(os.path.getsize(path))
+    except Exception:
+        return None
+
+
+def _ida_bytes_to_hex(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.hex()
+    text = str(value).strip()
+    return text or None
+
+
+def _input_hash(name: str) -> Optional[str]:
+    if not HAS_IDA:
+        return None
+    for module_name in ("ida_nalt", "ida_loader"):
+        try:
+            module = __import__(module_name)
+        except Exception:
+            continue
+        getter = getattr(module, name, None)
+        if getter is None:
+            continue
+        try:
+            return _ida_bytes_to_hex(getter())
+        except Exception:
+            continue
+    return None
+
+
+def _database_dirty_state() -> tuple[Optional[bool], Optional[str]]:
+    if not HAS_IDA:
+        return None, "IDA APIs unavailable"
+    checker = getattr(idaapi, "is_database_modified", None)
+    if checker is None:
+        return None, "idaapi.is_database_modified is unavailable"
+    try:
+        return bool(checker()), None
+    except Exception as exc:
+        return None, str(exc)
+
 def _collect_database_info() -> dict[str, Any]:
+    saved_db_path = _saved_database_path()
+    input_path = _input_file_path()
+    dirty_state, dirty_error = _database_dirty_state()
     info: dict[str, Any] = {
         "instance_id": instance_registry.instance_id,
         "port": instance_registry.port,
         "database": None,
-        "database_path": None,
+        "database_path": saved_db_path,
+        "input_file_path": input_path,
         "platform": sys.platform,
+        "dirty": dirty_state,
+        "unsaved": dirty_state,
+        "dirty_state_known": dirty_state is not None,
     }
+    if dirty_error:
+        info["dirty_error"] = dirty_error
+
+    if saved_db_path:
+        info["database_sha256"] = _sha256_file(saved_db_path)
+        info["database_size"] = _file_size(saved_db_path)
 
     if not HAS_IDA:
         return info
@@ -495,25 +615,11 @@ def _collect_database_info() -> dict[str, Any]:
     except Exception:
         pass
     try:
-        info["database_path"] = idaapi.get_input_file_path()
-    except Exception:
-        pass
-    try:
-        info["input_file_path"] = idaapi.get_input_file_path()
-    except Exception:
-        pass
-    try:
         info["root_filename"] = idaapi.get_root_filename()
     except Exception:
         pass
-    try:
-        info["dirty"] = bool(getattr(idaapi, "is_database_flag", lambda *_: False)(getattr(idaapi, "DBFL_KILL", -1)))
-    except Exception:
-        info["dirty"] = False
-    try:
-        info["unsaved"] = bool(getattr(idaapi, "is_database_modified", lambda: False)())
-    except Exception:
-        info["unsaved"] = False
+    info["input_md5"] = _input_hash("retrieve_input_file_md5")
+    info["input_sha256"] = _input_hash("retrieve_input_file_sha256")
     try:
         info["imagebase"] = int(idaapi.get_imagebase())
     except Exception:
@@ -544,52 +650,7 @@ def _collect_database_info() -> dict[str, Any]:
         except Exception:
             pass
 
-        for attr_name in ("min_ea", "max_ea"):
-            try:
-                attr_value = getattr(inf, attr_name)
-                if attr_value is not None:
-                    info[attr_name] = int(attr_value)
-            except Exception:
-                pass
-
-    try:
-        import idautils
-
-        info["function_count"] = sum(1 for _ in idautils.Functions())
-    except Exception:
-        pass
-
-    try:
-        import idautils
-
-        info["segment_count"] = sum(1 for _ in idautils.Segments())
-    except Exception:
-        pass
-
     return info
-
-
-def _function_summary(func) -> dict[str, Any]:
-    start_ea = int(func.start_ea)
-    end_ea = int(func.end_ea)
-    flags = 0
-    try:
-        flags = idc.get_func_flags(start_ea)
-    except Exception:
-        pass
-
-    thunk_mask = int(getattr(idc, "FUNC_THUNK", 0))
-    library_mask = int(getattr(idc, "FUNC_LIB", 0))
-
-    return {
-        "start_ea": start_ea,
-        "end_ea": end_ea,
-        "size": max(0, end_ea - start_ea),
-        "name": _symbol_name(start_ea),
-        "segment": _segment_name(start_ea),
-        "is_thunk": bool(flags & thunk_mask),
-        "is_library": bool(flags & library_mask),
-    }
 
 
 def list_functions_data(

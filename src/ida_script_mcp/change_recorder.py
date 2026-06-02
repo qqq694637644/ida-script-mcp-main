@@ -59,21 +59,23 @@ class ChangeRecorder:
         self.operations.append(op)
         return op
 
-    def install(self, modules: dict[str, Any]) -> None:
+    def install(self, modules: dict[str, Any], *, patch_explicit_api_modules: bool = True) -> None:
         """Patch common write APIs in provided IDAPython modules."""
         self._patch_two_arg_name(modules.get("idc"), "set_name")
-        self._patch_two_arg_name(modules.get("ida_name"), "set_name")
         self._patch_comment(modules.get("idc"), "set_cmt")
-        self._patch_comment(modules.get("ida_bytes"), "set_cmt")
         self._patch_func_comment(modules.get("idc"), "set_func_cmt")
-        self._patch_func_comment(modules.get("ida_funcs"), "set_func_cmt")
-        for module_name in ("idc", "ida_bytes"):
+        if patch_explicit_api_modules:
+            self._patch_two_arg_name(modules.get("ida_name"), "set_name")
+            self._patch_comment(modules.get("ida_bytes"), "set_cmt")
+            self._patch_func_comment(modules.get("ida_funcs"), "set_func_cmt")
+        for module_name in ("idc", "ida_bytes") if patch_explicit_api_modules else ("idc",):
             module = modules.get(module_name)
             self._patch_patch_int(module, "patch_byte", 1)
             self._patch_patch_int(module, "patch_word", 2)
             self._patch_patch_int(module, "patch_dword", 4)
             self._patch_patch_int(module, "patch_qword", 8)
-        self._patch_patch_bytes(modules.get("ida_bytes"), "patch_bytes")
+        if patch_explicit_api_modules:
+            self._patch_patch_bytes(modules.get("ida_bytes"), "patch_bytes")
         self._patch_type(modules.get("idc"), "SetType")
         self._patch_type(modules.get("idc"), "set_type")
 

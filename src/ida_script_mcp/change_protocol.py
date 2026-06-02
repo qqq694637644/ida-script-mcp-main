@@ -21,6 +21,8 @@ class DatabaseFingerprint(BaseModel):
     processor: Optional[str] = None
     bitness: Optional[int] = None
     copied_database_lineage: Optional[str] = None
+    database_sha256: Optional[str] = None
+    database_size: Optional[int] = None
 
 
 class ChangeBase(BaseModel):
@@ -132,6 +134,9 @@ def fingerprint_matches(expected: DatabaseFingerprint, actual: DatabaseFingerpri
             and expected.imagebase == actual.imagebase
         )
 
+    if expected.database_sha256 and actual.database_sha256:
+        return expected.database_sha256 == actual.database_sha256
+
     if expected.copied_database_lineage and actual.copied_database_lineage:
         return expected.copied_database_lineage == actual.copied_database_lineage
 
@@ -150,4 +155,6 @@ def fingerprint_from_metadata(metadata: dict[str, Any]) -> DatabaseFingerprint:
         processor=metadata.get("processor"),
         bitness=metadata.get("bitness"),
         copied_database_lineage=metadata.get("copied_database_lineage"),
+        database_sha256=metadata.get("database_sha256"),
+        database_size=metadata.get("database_size"),
     )

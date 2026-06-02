@@ -31,7 +31,13 @@ class FakeProcess:
 
 
 def _gui_context(db_path: Path, **extra):
-    return {"database_path": str(db_path), "dirty": False, "unsaved": False, **extra}
+    return {
+        "database_path": str(db_path),
+        "dirty": False,
+        "unsaved": False,
+        "dirty_state_known": True,
+        **extra,
+    }
 
 
 def test_dirty_gui_database_is_rejected_without_launch(tmp_path):
@@ -53,6 +59,29 @@ def test_dirty_gui_database_is_rejected_without_launch(tmp_path):
     )
 
     assert result.status == "rejected"
+    assert launched is False
+
+
+def test_unknown_dirty_state_is_rejected_without_launch(tmp_path):
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    launched = False
+
+    def popen(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
+        return FakeProcess()
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen)
+    result = manager.execute(
+        ExecuteRequest(code="1"),
+        gui_context=_gui_context(db, dirty=None, unsaved=None, dirty_state_known=False),
+        instance_id="sample",
+        port=1,
+    )
+
+    assert result.status == "rejected"
+    assert result.error.type == "GuiDatabaseDirtyStateUnknown"
     assert launched is False
 
 
@@ -86,12 +115,16 @@ def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path):
         (job_dir / "result.json").write_text(
             ExecuteResult(status="ok", result=7).model_dump_json(), encoding="utf-8"
         )
+        request_payload = json.loads((job_dir / "request.json").read_text(encoding="utf-8"))
+        assert request_payload["context"]["database_sha256"]
         (job_dir / "changes.json").write_text(
             json.dumps(
                 {
                     "schema_version": 1,
                     "job_id": job_dir.name,
-                    "database_fingerprint": {"input_sha256": "abc"},
+                    "database_fingerprint": {
+                        "database_sha256": request_payload["context"]["database_sha256"]
+                    },
                     "operations": [
                         {
                             "op_id": "op-1",

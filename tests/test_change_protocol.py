@@ -55,6 +55,9 @@ def test_fingerprint_matching_requires_strong_identity():
         DatabaseFingerprint(input_md5="m", root_filename="x", imagebase=1),
         DatabaseFingerprint(input_md5="m", root_filename="x", imagebase=1),
     )
+    assert fingerprint_matches(
+        DatabaseFingerprint(database_sha256="abc"), DatabaseFingerprint(database_sha256="abc")
+    )
     assert not fingerprint_matches(
         DatabaseFingerprint(database_path="same"), DatabaseFingerprint(database_path="same")
     )
