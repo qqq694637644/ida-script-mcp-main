@@ -955,7 +955,23 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
 
 def apply_changes_request(payload: dict[str, Any]) -> dict[str, Any]:
     request = ApplyChangesRequest.model_validate(payload)
-    current_fingerprint = fingerprint_from_metadata(_collect_database_info())
+    current_metadata = _collect_database_info()
+    if current_metadata.get("dirty_state_known") is False or current_metadata.get("dirty") is None:
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="database dirty state is unknown; refusing change replay",
+        ).model_dump(mode="json")
+    if current_metadata.get("dirty") or current_metadata.get("unsaved"):
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="database has unsaved changes; save before replaying worker changes",
+        ).model_dump(mode="json")
+
+    current_fingerprint = fingerprint_from_metadata(current_metadata)
     if not fingerprint_matches(request.database_fingerprint, current_fingerprint):
         return ApplyChangesResult(
             status="rejected",

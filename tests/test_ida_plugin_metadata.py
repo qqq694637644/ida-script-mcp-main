@@ -58,3 +58,67 @@ def test_collect_database_info_marks_dirty_unknown_on_api_failure(monkeypatch, t
     assert info["unsaved"] is None
     assert info["dirty_state_known"] is False
     assert "cannot tell" in info["dirty_error"]
+
+
+def _apply_payload(database_sha256: str = "abc") -> dict:
+    return {
+        "schema_version": 1,
+        "job_id": "job-1",
+        "database_fingerprint": {"database_sha256": database_sha256},
+        "operations": [],
+        "dry_run": True,
+    }
+
+
+def test_apply_changes_rejects_dirty_gui_before_fingerprint(monkeypatch):
+    monkeypatch.setattr(
+        ida_plugin,
+        "_collect_database_info",
+        lambda: {
+            "dirty_state_known": True,
+            "dirty": True,
+            "unsaved": True,
+            "database_sha256": "abc",
+        },
+    )
+
+    result = ida_plugin.apply_changes_request(_apply_payload("abc"))
+
+    assert result["status"] == "rejected"
+    assert "unsaved changes" in result["message"]
+
+
+def test_apply_changes_rejects_unknown_dirty_state_before_fingerprint(monkeypatch):
+    monkeypatch.setattr(
+        ida_plugin,
+        "_collect_database_info",
+        lambda: {
+            "dirty_state_known": False,
+            "dirty": None,
+            "unsaved": None,
+            "database_sha256": "abc",
+        },
+    )
+
+    result = ida_plugin.apply_changes_request(_apply_payload("abc"))
+
+    assert result["status"] == "rejected"
+    assert "dirty state is unknown" in result["message"]
+
+
+def test_apply_changes_allows_clean_dry_run_with_matching_fingerprint(monkeypatch):
+    monkeypatch.setattr(
+        ida_plugin,
+        "_collect_database_info",
+        lambda: {
+            "dirty_state_known": True,
+            "dirty": False,
+            "unsaved": False,
+            "database_sha256": "abc",
+        },
+    )
+
+    result = ida_plugin.apply_changes_request(_apply_payload("abc"))
+
+    assert result["status"] == "ok"
+    assert result["dry_run"] is True
