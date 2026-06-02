@@ -160,6 +160,50 @@ worker process tree and returns `killed=true`; generated changes are not applied
 to the GUI database unless `apply_worker_changes(..., dry_run=false)` is called
 explicitly after preview.
 
+### Real IDA CI with a self-hosted runner
+
+Unit tests do not require IDA and should continue to run on GitHub-hosted
+runners. Real isolated-worker validation needs a legal IDA installation,
+license, and saved clean `.i64` / `.idb` fixture, so run it on a controlled
+self-hosted runner instead of committing IDA runtime files to the repository.
+
+Setup outline:
+
+1. Prepare a private Windows or Linux machine/VM with IDA installed and licensed.
+2. In GitHub, open the repository **Settings → Actions → Runners → New
+   self-hosted runner**, choose the OS/architecture, then run GitHub's generated
+   download and `config` commands on that machine.
+3. Add labels such as `ida`, `windows`, or `linux` when configuring the runner,
+   so IDA integration jobs can target only that machine.
+4. Configure environment variables on the runner account or service:
+   - `IDA_SCRIPT_MCP_IDA_PATH` — full path to `idat64`, `idat`, `ida64`, or `ida`.
+   - `IDA_SCRIPT_MCP_WORK_DIR` — scratch directory for isolated worker jobs.
+5. Keep IDA binaries, license files, and IDB fixtures out of public commits.
+   Store fixtures on the runner or fetch them from private storage only in
+   trusted workflows.
+
+Example workflow job:
+
+```yaml
+jobs:
+  ida-integration:
+    runs-on: [self-hosted, ida]
+    env:
+      IDA_SCRIPT_MCP_IDA_PATH: ${{ vars.IDA_SCRIPT_MCP_IDA_PATH }}
+      IDA_SCRIPT_MCP_WORK_DIR: ${{ runner.temp }}/ida-script-mcp-jobs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e . pytest
+      - run: python -m pytest -q tests/integration_ida
+```
+
+Run this workflow only for trusted branches, `workflow_dispatch`, or protected
+environments. Do not expose a licensed IDA runner to arbitrary fork pull-request
+code.
+
 ### License
 
 MIT License
@@ -303,6 +347,49 @@ unsaved 或无法确认状态时都会被拒绝，不会自动保存或降级执
 `worker_result_missing`、`recorder_error` 或 `rejected`。hard timeout 会杀掉
 worker 进程树并返回 `killed=true`。worker 产生的变更不会自动应用到 GUI
 数据库，必须先 preview，再显式调用 `apply_worker_changes(..., dry_run=false)`。
+
+### 使用 self-hosted runner 运行真实 IDA CI
+
+普通单元测试不需要 IDA，应该继续跑在 GitHub-hosted runner 上。真实的
+isolated worker 验证需要合法 IDA 安装、license，以及已保存且 clean 的
+`.i64` / `.idb` fixture，因此应放在你自己控制的 self-hosted runner 上，
+不要把 IDA runtime 提交进仓库。
+
+设置步骤：
+
+1. 准备一台私有 Windows 或 Linux 机器/VM，安装并激活 IDA。
+2. 在 GitHub 仓库进入 **Settings → Actions → Runners → New self-hosted
+   runner**，选择系统/架构，然后在机器上执行 GitHub 生成的下载和
+   `config` 命令。
+3. 配置 runner 时加上 `ida`、`windows` 或 `linux` 等 label，确保 IDA
+   集成测试只调度到这台机器。
+4. 在 runner 用户或服务环境中配置：
+   - `IDA_SCRIPT_MCP_IDA_PATH`：`idat64`、`idat`、`ida64` 或 `ida` 的完整路径。
+   - `IDA_SCRIPT_MCP_WORK_DIR`：isolated worker job 的临时工作目录。
+5. 不要把 IDA 二进制、license 文件、私有 IDB fixture 提交到公开仓库。
+   fixture 可以预放在 runner 上，或仅在可信 workflow 中从私有存储获取。
+
+示例 workflow job：
+
+```yaml
+jobs:
+  ida-integration:
+    runs-on: [self-hosted, ida]
+    env:
+      IDA_SCRIPT_MCP_IDA_PATH: ${{ vars.IDA_SCRIPT_MCP_IDA_PATH }}
+      IDA_SCRIPT_MCP_WORK_DIR: ${{ runner.temp }}/ida-script-mcp-jobs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e . pytest
+      - run: python -m pytest -q tests/integration_ida
+```
+
+建议只允许可信分支、`workflow_dispatch` 或受保护 environment 触发这类
+workflow。不要让来自 fork PR 的任意代码直接运行在带 IDA license 的
+self-hosted runner 上。
 
 ### 许可证
 
