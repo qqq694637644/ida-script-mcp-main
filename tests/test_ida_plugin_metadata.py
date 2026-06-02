@@ -82,13 +82,18 @@ def test_collect_database_info_marks_database_hash_failure_unknown(monkeypatch, 
     assert "failed to compute SHA-256" in info["database_identity_error"]
 
 
-def _apply_payload(database_sha256: str = "abc") -> dict:
+def _apply_payload(
+    database_sha256: str = "abc",
+    *,
+    operations: list[dict] | None = None,
+    dry_run: bool = True,
+) -> dict:
     return {
         "schema_version": 1,
         "job_id": "job-1",
         "database_fingerprint": {"database_sha256": database_sha256},
-        "operations": [],
-        "dry_run": True,
+        "operations": operations or [],
+        "dry_run": dry_run,
     }
 
 
@@ -162,3 +167,89 @@ def test_apply_changes_rejects_missing_database_identity(monkeypatch):
 
     assert result["status"] == "rejected"
     assert "SHA-256 is unavailable" in result["message"]
+
+
+def _clean_matching_metadata(monkeypatch):
+    monkeypatch.setattr(
+        ida_plugin,
+        "_collect_database_info",
+        lambda: {
+            "dirty_state_known": True,
+            "dirty": False,
+            "unsaved": False,
+            "database_identity_known": True,
+            "database_sha256": "abc",
+        },
+    )
+
+
+def test_apply_changes_rename_missing_gui_api_returns_operation_error(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", False)
+    payload = _apply_payload(
+        operations=[
+            {
+                "op_id": "op-1",
+                "op": "rename",
+                "ea": 0x1000,
+                "source": "explicit_api",
+                "new_name": "main",
+            }
+        ],
+        dry_run=False,
+    )
+
+    result = ida_plugin.apply_changes_request(payload)
+
+    assert result["status"] == "error"
+    assert result["applied"] == []
+    assert result["errors"][0]["status"] == "error"
+    assert "IDA runtime is unavailable" in result["errors"][0]["message"]
+
+
+def test_apply_changes_set_type_missing_gui_api_returns_operation_error(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", False)
+    payload = _apply_payload(
+        operations=[
+            {
+                "op_id": "op-1",
+                "op": "set_type",
+                "ea": 0x1000,
+                "source": "explicit_api",
+                "decl": "int main(void);",
+            }
+        ],
+        dry_run=False,
+    )
+
+    result = ida_plugin.apply_changes_request(payload)
+
+    assert result["status"] == "error"
+    assert result["applied"] == []
+    assert result["errors"][0]["status"] == "error"
+    assert "IDA runtime is unavailable" in result["errors"][0]["message"]
+
+
+def test_apply_changes_dry_run_skips_without_gui_api(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", False)
+    payload = _apply_payload(
+        operations=[
+            {
+                "op_id": "op-1",
+                "op": "rename",
+                "ea": 0x1000,
+                "source": "explicit_api",
+                "new_name": "main",
+            }
+        ],
+        dry_run=True,
+    )
+
+    result = ida_plugin.apply_changes_request(payload)
+
+    assert result["status"] == "ok"
+    assert result["applied"] == []
+    assert result["errors"] == []
+    assert result["skipped"][0]["status"] == "skipped"

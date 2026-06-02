@@ -290,12 +290,19 @@ ida_script_mcp/resources/idapython/
 
 ### 安全提示
 
-`execute_idapython` 可以在 IDA 内执行任意 Python 代码，也可以修改 IDB。
-只应与可信的 AI 助手一起使用，并保持插件仅监听 localhost。
+`execute_idapython` 会通过隔离的 IDA worker 进程执行任意 Python。
+GUI 插件只用于安全元数据读取和结构化变更 replay；公开执行路径不会回退到
+GUI `/execute`。
 
-脚本执行会返回明确的 `status`，例如 `ok`、`timeout`、`script_error` 或
-`source_error`。`plugin_response_timeout` 表示 MCP server 已停止等待 IDA
-插件响应；脚本可能仍在 IDA 内运行，尤其是阻塞在 native IDA/C 代码时。
+使用隔离执行前，请设置 `IDA_SCRIPT_MCP_IDA_PATH` 指向 `idat`、`idat64`、
+`ida` 或 `ida64`。当前 GUI 数据库必须已经保存且处于 clean 状态；dirty、
+unsaved 或无法确认状态时都会被拒绝，不会自动保存或降级执行。
+
+脚本执行会返回明确的 `status`，例如 `ok`、`timeout`、`script_error`、
+`source_error`、`worker_start_error`、`worker_crashed`、
+`worker_result_missing`、`recorder_error` 或 `rejected`。hard timeout 会杀掉
+worker 进程树并返回 `killed=true`。worker 产生的变更不会自动应用到 GUI
+数据库，必须先 preview，再显式调用 `apply_worker_changes(..., dry_run=false)`。
 
 ### 许可证
 

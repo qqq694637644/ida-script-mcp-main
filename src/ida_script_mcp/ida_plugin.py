@@ -934,27 +934,46 @@ def get_xrefs_data(
     return result
 
 
+def _required_gui_api(module_name: str, function_name: str):
+    if not HAS_IDA:
+        raise RuntimeError("IDA runtime is unavailable for GUI change replay")
+    module = __import__(module_name)
+    function = getattr(module, function_name, None)
+    if function is None:
+        raise RuntimeError(f"Required IDAPython API is unavailable: {module_name}.{function_name}")
+    return function
+
+
+def _required_gui_type_api():
+    if not HAS_IDA:
+        raise RuntimeError("IDA runtime is unavailable for GUI change replay")
+    module = __import__("idc")
+    setter = getattr(module, "set_type", None) or getattr(module, "SetType", None)
+    if setter is None:
+        raise RuntimeError("Required IDAPython API is unavailable: idc.set_type/SetType")
+    return setter
+
+
 def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
     op = operation.op
     try:
         if dry_run:
             return OperationApplyResult(op_id=operation.op_id, op=op, status="skipped", message="dry run")
         if op == "rename":
-            module = __import__("ida_name") if HAS_IDA else None
-            ok = module.set_name(operation.ea, operation.new_name, operation.flags) if module else True
+            set_name = _required_gui_api("ida_name", "set_name")
+            ok = set_name(operation.ea, operation.new_name, operation.flags)
         elif op == "comment":
-            module = __import__("ida_bytes") if HAS_IDA else None
-            ok = module.set_cmt(operation.ea, operation.text, int(operation.repeatable)) if module else True
+            set_cmt = _required_gui_api("ida_bytes", "set_cmt")
+            ok = set_cmt(operation.ea, operation.text, int(operation.repeatable))
         elif op == "function_comment":
-            module = __import__("ida_funcs") if HAS_IDA else None
-            ok = module.set_func_cmt(operation.ea, operation.text, int(operation.repeatable)) if module else True
+            set_func_cmt = _required_gui_api("ida_funcs", "set_func_cmt")
+            ok = set_func_cmt(operation.ea, operation.text, int(operation.repeatable))
         elif op == "patch_bytes":
-            module = __import__("ida_bytes") if HAS_IDA else None
-            ok = module.patch_bytes(operation.ea, bytes.fromhex(operation.new_bytes_hex)) if module else True
+            patch_bytes = _required_gui_api("ida_bytes", "patch_bytes")
+            ok = patch_bytes(operation.ea, bytes.fromhex(operation.new_bytes_hex))
         elif op == "set_type":
-            module = __import__("idc") if HAS_IDA else None
-            setter = getattr(module, "set_type", None) or getattr(module, "SetType", None) if module else None
-            ok = setter(operation.ea, operation.decl) if setter else True
+            setter = _required_gui_type_api()
+            ok = setter(operation.ea, operation.decl)
         else:
             return OperationApplyResult(op_id=operation.op_id, op=op, status="error", message="unsupported operation")
         if not ok:
