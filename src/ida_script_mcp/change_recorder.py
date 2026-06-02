@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, Iterator, Optional
+from typing import Any
 
 from .change_protocol import (
     ChangeOperation,
@@ -27,13 +28,13 @@ def _required_module(modules: dict[str, Any], module_name: str) -> Any:
     return module
 
 
-def _required_callable(modules: dict[str, Any], module_name: str, function_name: str) -> Callable[..., Any]:
+def _required_callable(
+    modules: dict[str, Any], module_name: str, function_name: str
+) -> Callable[..., Any]:
     module = _required_module(modules, module_name)
     function = getattr(module, function_name, None)
     if not callable(function):
-        raise RecorderError(
-            f"Required IDAPython API is unavailable: {module_name}.{function_name}"
-        )
+        raise RecorderError(f"Required IDAPython API is unavailable: {module_name}.{function_name}")
     return function
 
 
@@ -73,7 +74,7 @@ class ChangeRecorder:
         ea: int,
         new_name: str,
         *,
-        old_name: Optional[str] = None,
+        old_name: str | None = None,
         flags: int = 0,
         source: str = "explicit_api",
     ) -> RenameChange:
@@ -129,7 +130,7 @@ class ChangeRecorder:
         ea: int,
         data: bytes | bytearray | str,
         *,
-        old_bytes_hex: Optional[str] = None,
+        old_bytes_hex: str | None = None,
         source: str = "explicit_api",
     ) -> PatchBytesChange:
         new_bytes_hex = self._coerce_patch_bytes(data).hex()
@@ -223,7 +224,9 @@ class ChangeRecorder:
                 return bytes.fromhex(data.strip())
             except ValueError as exc:
                 raise RecorderError("patch_bytes string data must be hex encoded") from exc
-        raise RecorderError(f"patch_bytes data must be bytes, bytearray, or hex string: {type(data)!r}")
+        raise RecorderError(
+            f"patch_bytes data must be bytes, bytearray, or hex string: {type(data)!r}"
+        )
 
     @staticmethod
     def _int_to_bytes(value: Any, width: int) -> bytes:
@@ -235,7 +238,7 @@ class ChangeRecorder:
             raise RecorderError(f"patch integer value does not fit in {width} bytes")
         return integer.to_bytes(width, "little", signed=False)
 
-    def _old_name(self, modules: dict[str, Any], ea: int) -> Optional[str]:
+    def _old_name(self, modules: dict[str, Any], ea: int) -> str | None:
         get_name = _required_callable(modules, "idc", "get_name")
         try:
             value = get_name(int(ea))

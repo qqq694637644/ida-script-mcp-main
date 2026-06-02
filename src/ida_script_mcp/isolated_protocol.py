@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 try:
     from pydantic import BaseModel, ConfigDict, Field
@@ -35,7 +35,7 @@ if HAS_PYDANTIC:
         job_id: str
         database_path: str
         database_copy_path: str
-        input_file_path: Optional[str] = None
+        input_file_path: str | None = None
         context: dict[str, Any] = Field(default_factory=dict)
         collect_changes: bool = True
         output_dir: str
@@ -45,26 +45,22 @@ else:
     class _ValidationError(ValueError):
         """Fallback validation error used only when pydantic is unavailable."""
 
-
     def _required_str(value: Any, field_name: str) -> str:
         if not isinstance(value, str):
             raise _ValidationError(f"{field_name} must be a string")
         return value
 
-
-    def _optional_str(value: Any, field_name: str) -> Optional[str]:
+    def _optional_str(value: Any, field_name: str) -> str | None:
         if value is None:
             return None
         if not isinstance(value, str):
             raise _ValidationError(f"{field_name} must be a string")
         return value
 
-
     def _strict_bool(value: Any, field_name: str) -> bool:
         if type(value) is not bool:
             raise _ValidationError(f"{field_name} must be a strict bool")
         return value
-
 
     def _dump_value(value: Any) -> Any:
         if hasattr(value, "model_dump"):
@@ -74,7 +70,6 @@ else:
         if isinstance(value, list):
             return [_dump_value(item) for item in value]
         return value
-
 
     class IsolatedExecuteRequest:
         """Request serialized into an isolated worker job directory."""
@@ -97,8 +92,8 @@ else:
             job_id: str,
             database_path: str,
             database_copy_path: str,
-            input_file_path: Optional[str] = None,
-            context: Optional[dict[str, Any]] = None,
+            input_file_path: str | None = None,
+            context: dict[str, Any] | None = None,
             collect_changes: bool = True,
             output_dir: str,
             **extra: Any,
@@ -136,7 +131,7 @@ else:
         def model_dump(
             self,
             mode: str = "json",
-            exclude: Optional[set[str]] = None,
+            exclude: set[str] | None = None,
         ) -> dict[str, Any]:
             exclude = exclude or set()
             return {
@@ -148,7 +143,7 @@ else:
         def model_dump_json(self) -> str:
             return json.dumps(self.model_dump(mode="json"), ensure_ascii=False)
 
-        def model_copy(self, *, update: Optional[dict[str, Any]] = None):
+        def model_copy(self, *, update: dict[str, Any] | None = None):
             data = self.model_dump(mode="json")
             if update:
                 data.update(update)

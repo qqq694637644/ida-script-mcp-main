@@ -145,7 +145,9 @@ class TestExecuteIdapython:
                 assert instance_id == "sample.exe"
                 assert port == 13338
                 assert collect_changes is True
-                return ExecuteResult(status="worker_start_error", error={"type": "test", "message": "no ida"})
+                return ExecuteResult(
+                    status="worker_start_error", error={"type": "test", "message": "no ida"}
+                )
 
         monkeypatch.setattr("ida_script_mcp.server.make_ida_request", fake_make_ida_request)
         monkeypatch.setattr("ida_script_mcp.server.IsolatedExecutionManager", lambda: FakeManager())

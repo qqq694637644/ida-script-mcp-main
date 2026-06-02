@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal
 
 try:
     from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -24,18 +24,17 @@ if HAS_PYDANTIC:
 
         model_config = ConfigDict(extra="forbid")
 
-        input_file_path: Optional[str] = None
-        database_path: Optional[str] = None
-        root_filename: Optional[str] = None
-        imagebase: Optional[int] = None
-        input_md5: Optional[str] = None
-        input_sha256: Optional[str] = None
-        processor: Optional[str] = None
-        bitness: Optional[int] = None
-        copied_database_lineage: Optional[str] = None
-        database_sha256: Optional[str] = None
-        database_size: Optional[int] = None
-
+        input_file_path: str | None = None
+        database_path: str | None = None
+        root_filename: str | None = None
+        imagebase: int | None = None
+        input_md5: str | None = None
+        input_sha256: str | None = None
+        processor: str | None = None
+        bitness: int | None = None
+        copied_database_lineage: str | None = None
+        database_sha256: str | None = None
+        database_size: int | None = None
 
     class ChangeBase(BaseModel):
         """Base metadata carried by every replayable change."""
@@ -44,19 +43,17 @@ if HAS_PYDANTIC:
 
         op_id: str
         op: str
-        ea: Optional[int] = None
+        ea: int | None = None
         source: Literal["explicit_api", "monkeypatch"]
         confidence: Literal["high", "medium", "low"] = "high"
-        reason: Optional[str] = None
-
+        reason: str | None = None
 
     class RenameChange(ChangeBase):
         op: Literal["rename"] = "rename"
         ea: int
-        old_name: Optional[str] = None
+        old_name: str | None = None
         new_name: str
         flags: int = 0
-
 
     class CommentChange(ChangeBase):
         op: Literal["comment"] = "comment"
@@ -64,20 +61,17 @@ if HAS_PYDANTIC:
         text: str
         repeatable: bool = False
 
-
     class FunctionCommentChange(ChangeBase):
         op: Literal["function_comment"] = "function_comment"
         ea: int
         text: str
         repeatable: bool = False
 
-
     class PatchBytesChange(ChangeBase):
         op: Literal["patch_bytes"] = "patch_bytes"
         ea: int
-        old_bytes_hex: Optional[str] = None
+        old_bytes_hex: str | None = None
         new_bytes_hex: str
-
 
     class TypeChange(ChangeBase):
         op: Literal["set_type"] = "set_type"
@@ -85,12 +79,10 @@ if HAS_PYDANTIC:
         decl: str
         flags: int = 0
 
-
     ChangeOperation = Annotated[
         RenameChange | CommentChange | FunctionCommentChange | PatchBytesChange | TypeChange,
         Field(discriminator="op"),
     ]
-
 
     class ChangeSet(BaseModel):
         """A set of worker changes that can be previewed or replayed into the GUI database."""
@@ -102,12 +94,10 @@ if HAS_PYDANTIC:
         database_fingerprint: DatabaseFingerprint
         operations: list[ChangeOperation] = Field(default_factory=list)
 
-
     class ApplyChangesRequest(ChangeSet):
         """GUI ``/apply_changes`` request body."""
 
         dry_run: StrictBool = True
-
 
     class OperationApplyResult(BaseModel):
         """Per-operation preview/apply result."""
@@ -118,7 +108,6 @@ if HAS_PYDANTIC:
         op: str
         status: Literal["applied", "skipped", "error"]
         message: str = ""
-
 
     class ApplyChangesResult(BaseModel):
         """Structured response from GUI change replay."""
@@ -138,46 +127,39 @@ else:
     class _ValidationError(ValueError):
         """Fallback validation error used only when pydantic is unavailable."""
 
-
     def _reject_extra(data: dict[str, Any], allowed: set[str], model_name: str) -> None:
         extra = set(data) - allowed
         if extra:
             raise _ValidationError(f"{model_name} forbids extra fields: {sorted(extra)!r}")
-
 
     def _strict_bool(value: Any, field_name: str) -> bool:
         if type(value) is not bool:
             raise _ValidationError(f"{field_name} must be a strict bool")
         return value
 
-
-    def _optional_int(value: Any, field_name: str) -> Optional[int]:
+    def _optional_int(value: Any, field_name: str) -> int | None:
         if value is None:
             return None
         if type(value) is bool:
             raise _ValidationError(f"{field_name} must be an int")
         return int(value)
 
-
     def _required_int(value: Any, field_name: str) -> int:
         if value is None or type(value) is bool:
             raise _ValidationError(f"{field_name} must be an int")
         return int(value)
 
-
-    def _optional_str(value: Any, field_name: str) -> Optional[str]:
+    def _optional_str(value: Any, field_name: str) -> str | None:
         if value is None:
             return None
         if not isinstance(value, str):
             raise _ValidationError(f"{field_name} must be a string")
         return value
 
-
     def _required_str(value: Any, field_name: str) -> str:
         if not isinstance(value, str):
             raise _ValidationError(f"{field_name} must be a string")
         return value
-
 
     def _source(value: Any) -> str:
         value = _required_str(value, "source")
@@ -185,13 +167,11 @@ else:
             raise _ValidationError("source must be explicit_api or monkeypatch")
         return value
 
-
     def _confidence(value: Any) -> str:
         value = _required_str(value, "confidence")
         if value not in {"high", "medium", "low"}:
             raise _ValidationError("confidence must be high, medium, or low")
         return value
-
 
     def _dump_value(value: Any) -> Any:
         if hasattr(value, "model_dump"):
@@ -201,7 +181,6 @@ else:
         if isinstance(value, dict):
             return {str(key): _dump_value(inner) for key, inner in value.items()}
         return value
-
 
     class _SimpleModel:
         _fields: tuple[str, ...] = ()
@@ -221,7 +200,7 @@ else:
         def model_dump(
             self,
             mode: str = "json",
-            exclude: Optional[set[str]] = None,
+            exclude: set[str] | None = None,
         ) -> dict[str, Any]:
             exclude = exclude or set()
             return {
@@ -233,12 +212,11 @@ else:
         def model_dump_json(self) -> str:
             return json.dumps(self.model_dump(mode="json"), ensure_ascii=False)
 
-        def model_copy(self, *, update: Optional[dict[str, Any]] = None):
+        def model_copy(self, *, update: dict[str, Any] | None = None):
             data = self.model_dump(mode="json")
             if update:
                 data.update(update)
             return self.__class__.model_validate(data)
-
 
     class DatabaseFingerprint(_SimpleModel):
         """Strong database identity used before replaying worker changes."""
@@ -260,17 +238,17 @@ else:
         def __init__(
             self,
             *,
-            input_file_path: Optional[str] = None,
-            database_path: Optional[str] = None,
-            root_filename: Optional[str] = None,
-            imagebase: Optional[int] = None,
-            input_md5: Optional[str] = None,
-            input_sha256: Optional[str] = None,
-            processor: Optional[str] = None,
-            bitness: Optional[int] = None,
-            copied_database_lineage: Optional[str] = None,
-            database_sha256: Optional[str] = None,
-            database_size: Optional[int] = None,
+            input_file_path: str | None = None,
+            database_path: str | None = None,
+            root_filename: str | None = None,
+            imagebase: int | None = None,
+            input_md5: str | None = None,
+            input_sha256: str | None = None,
+            processor: str | None = None,
+            bitness: int | None = None,
+            copied_database_lineage: str | None = None,
+            database_sha256: str | None = None,
+            database_size: int | None = None,
             **extra: Any,
         ):
             if extra:
@@ -291,7 +269,6 @@ else:
             self.database_sha256 = _optional_str(database_sha256, "database_sha256")
             self.database_size = _optional_int(database_size, "database_size")
 
-
     class ChangeBase(_SimpleModel):
         """Base metadata carried by every replayable change."""
 
@@ -302,10 +279,10 @@ else:
             *,
             op_id: str,
             op: str,
-            ea: Optional[int],
+            ea: int | None,
             source: str,
             confidence: str = "high",
-            reason: Optional[str] = None,
+            reason: str | None = None,
         ) -> None:
             self.op_id = _required_str(op_id, "op_id")
             self.op = _required_str(op, "op")
@@ -313,7 +290,6 @@ else:
             self.source = _source(source)
             self.confidence = _confidence(confidence)
             self.reason = _optional_str(reason, "reason")
-
 
     class RenameChange(ChangeBase):
         _fields = ChangeBase._base_fields + ("old_name", "new_name", "flags")
@@ -326,10 +302,10 @@ else:
             new_name: str,
             source: str,
             op: str = "rename",
-            old_name: Optional[str] = None,
+            old_name: str | None = None,
             flags: int = 0,
             confidence: str = "high",
-            reason: Optional[str] = None,
+            reason: str | None = None,
             **extra: Any,
         ):
             if extra:
@@ -348,7 +324,6 @@ else:
             self.new_name = _required_str(new_name, "new_name")
             self.flags = _required_int(flags, "flags")
 
-
     class CommentChange(ChangeBase):
         _fields = ChangeBase._base_fields + ("text", "repeatable")
 
@@ -362,7 +337,7 @@ else:
             op: str = "comment",
             repeatable: bool = False,
             confidence: str = "high",
-            reason: Optional[str] = None,
+            reason: str | None = None,
             **extra: Any,
         ):
             if extra:
@@ -380,14 +355,12 @@ else:
             self.text = _required_str(text, "text")
             self.repeatable = _strict_bool(repeatable, "repeatable")
 
-
     class FunctionCommentChange(CommentChange):
         def __init__(self, *, op: str = "function_comment", **kwargs: Any):
             if op != "function_comment":
                 raise _ValidationError("FunctionCommentChange op must be function_comment")
             super().__init__(op="comment", **kwargs)
             self.op = "function_comment"
-
 
     class PatchBytesChange(ChangeBase):
         _fields = ChangeBase._base_fields + ("old_bytes_hex", "new_bytes_hex")
@@ -400,9 +373,9 @@ else:
             new_bytes_hex: str,
             source: str,
             op: str = "patch_bytes",
-            old_bytes_hex: Optional[str] = None,
+            old_bytes_hex: str | None = None,
             confidence: str = "high",
-            reason: Optional[str] = None,
+            reason: str | None = None,
             **extra: Any,
         ):
             if extra:
@@ -420,7 +393,6 @@ else:
             self.old_bytes_hex = _optional_str(old_bytes_hex, "old_bytes_hex")
             self.new_bytes_hex = _required_str(new_bytes_hex, "new_bytes_hex")
 
-
     class TypeChange(ChangeBase):
         _fields = ChangeBase._base_fields + ("decl", "flags")
 
@@ -434,7 +406,7 @@ else:
             op: str = "set_type",
             flags: int = 0,
             confidence: str = "high",
-            reason: Optional[str] = None,
+            reason: str | None = None,
             **extra: Any,
         ):
             if extra:
@@ -452,11 +424,9 @@ else:
             self.decl = _required_str(decl, "decl")
             self.flags = _required_int(flags, "flags")
 
-
     ChangeOperation = (
         RenameChange | CommentChange | FunctionCommentChange | PatchBytesChange | TypeChange
     )
-
 
     def _change_operation(data: Any) -> ChangeOperation:
         if isinstance(
@@ -479,7 +449,6 @@ else:
             return TypeChange.model_validate(data)
         raise _ValidationError(f"unsupported change operation: {op!r}")
 
-
     class ChangeSet(_SimpleModel):
         """A set of worker changes that can be previewed or replayed into the GUI database."""
 
@@ -490,7 +459,7 @@ else:
             *,
             job_id: str,
             database_fingerprint: DatabaseFingerprint | dict[str, Any],
-            operations: Optional[list[Any]] = None,
+            operations: list[Any] | None = None,
             schema_version: int = 1,
             **extra: Any,
         ):
@@ -503,7 +472,6 @@ else:
             self.database_fingerprint = DatabaseFingerprint.model_validate(database_fingerprint)
             self.operations = [_change_operation(operation) for operation in (operations or [])]
 
-
     class ApplyChangesRequest(ChangeSet):
         """GUI ``/apply_changes`` request body."""
 
@@ -512,7 +480,6 @@ else:
         def __init__(self, *, dry_run: bool = True, **kwargs: Any):
             super().__init__(**kwargs)
             self.dry_run = _strict_bool(dry_run, "dry_run")
-
 
     class OperationApplyResult(_SimpleModel):
         """Per-operation preview/apply result."""
@@ -531,7 +498,6 @@ else:
             self.status = status
             self.message = _required_str(message, "message")
 
-
     class ApplyChangesResult(_SimpleModel):
         """Structured response from GUI change replay."""
 
@@ -543,9 +509,9 @@ else:
             status: str,
             job_id: str,
             dry_run: bool = True,
-            applied: Optional[list[Any]] = None,
-            skipped: Optional[list[Any]] = None,
-            errors: Optional[list[Any]] = None,
+            applied: list[Any] | None = None,
+            skipped: list[Any] | None = None,
+            errors: list[Any] | None = None,
             message: str = "",
             **extra: Any,
         ):

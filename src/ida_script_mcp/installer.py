@@ -14,7 +14,6 @@ import os
 import shutil
 import sys
 import tempfile
-from pathlib import Path
 
 try:
     from .installer_data import (
@@ -119,9 +118,7 @@ def install_ida_plugin(*, uninstall: bool = False, quiet: bool = False) -> bool:
 
     if uninstall:
         removed_paths = [
-            path
-            for path in [plugin_destination, *support_destinations]
-            if os.path.lexists(path)
+            path for path in [plugin_destination, *support_destinations] if os.path.lexists(path)
         ]
         for path in removed_paths:
             _remove_path(path)
@@ -182,7 +179,7 @@ def _read_config_file(config_path: str, *, is_toml: bool = False) -> dict | None
             with open(config_path, "rb") as handle:
                 return tomllib.load(handle)
 
-        with open(config_path, "r", encoding="utf-8") as handle:
+        with open(config_path, encoding="utf-8") as handle:
             data = handle.read().strip()
             return json.loads(data) if data else {}
     except (json.JSONDecodeError, OSError, ValueError):

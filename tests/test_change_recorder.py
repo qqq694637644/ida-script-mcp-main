@@ -228,12 +228,12 @@ def test_patch_byte_captures_old_bytes_before_write():
 
 
 def test_apply_tinfo_monkeypatch_records_printable_type():
-    modules, _calls, _names, _memory, FakeTinfo = _fake_modules()
+    modules, _calls, _names, _memory, fake_tinfo_type = _fake_modules()
     recorder = ChangeRecorder()
     recorder.install(modules)
 
     try:
-        assert modules["ida_typeinf"].apply_tinfo(BASE_EA, FakeTinfo(), 7) is True
+        assert modules["ida_typeinf"].apply_tinfo(BASE_EA, fake_tinfo_type(), 7) is True
     finally:
         recorder.uninstall()
 

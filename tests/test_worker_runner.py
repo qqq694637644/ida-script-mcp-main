@@ -96,7 +96,9 @@ def _install_fake_ida_runtime(monkeypatch, opened_database_path: Path) -> dict[s
         patch_qword=patch_int(8),
         patch_bytes=patch_bytes,
     )
-    ida_auto = types.SimpleNamespace(auto_wait=lambda: state["auto_wait_calls"].append(True) or True)
+    ida_auto = types.SimpleNamespace(
+        auto_wait=lambda: state["auto_wait_calls"].append(True) or True
+    )
     ida_loader = types.SimpleNamespace(
         PATH_TYPE_IDB=1,
         get_path=lambda path_type: str(opened_database_path) if path_type == 1 else None,

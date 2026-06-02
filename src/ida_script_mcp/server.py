@@ -22,13 +22,13 @@ import http.client
 import json
 import logging
 import os
-import socket
-import time
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
+from .change_protocol import ApplyChangesRequest
+from .isolated_manager import IsolatedExecutionManager
 from .protocol import (
     DEFAULT_EXECUTE_TIMEOUT_SECONDS,
     MAX_EXECUTE_TIMEOUT_SECONDS,
@@ -36,19 +36,18 @@ from .protocol import (
     ExecuteResult,
     ExecutionError,
 )
-from .isolated_manager import IsolatedExecutionManager
-from .change_protocol import ApplyChangesRequest
 
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:  # pragma: no cover - fallback for local tests without mcp installed
+
     class FastMCP:  # type: ignore[override]
         """Tiny fallback shim so the module remains importable in test environments."""
 
         def __init__(self, *_args: Any, **_kwargs: Any):
             self._tools: dict[str, Any] = {}
 
-        def tool(self, name: Optional[str] = None, **_kwargs: Any):
+        def tool(self, name: str | None = None, **_kwargs: Any):
             def decorator(func):
                 self._tools[name or func.__name__] = func
                 return func
@@ -74,16 +73,14 @@ DEFAULT_ERROR_HINT = (
 )
 
 
-class IdaPluginResponseTimeout(RuntimeError):
+class IdaPluginResponseTimeout(RuntimeError):  # noqa: N818
     """Raised when the IDA plugin does not return an HTTP response in time."""
 
     def __init__(self, host: str, port: int, timeout: float):
         self.host = host
         self.port = port
         self.timeout = timeout
-        super().__init__(
-            f"IDA plugin at {host}:{port} did not respond within {timeout:g} seconds"
-        )
+        super().__init__(f"IDA plugin at {host}:{port} did not respond within {timeout:g} seconds")
 
 
 class InstanceTargetInput(BaseModel):
@@ -94,14 +91,14 @@ class InstanceTargetInput(BaseModel):
         validate_assignment=True,
     )
 
-    instance_id: Optional[str] = Field(
+    instance_id: str | None = Field(
         default=None,
         description=(
             "Target IDA instance ID. Use the full instance id from list_ida_instances, "
             "or a unique substring of that instance id such as a database filename."
         ),
     )
-    port: Optional[int] = Field(
+    port: int | None = Field(
         default=None,
         ge=1,
         le=65535,
@@ -129,11 +126,11 @@ class ListFunctionsInput(InstanceTargetInput):
         le=5000,
         description="Maximum number of functions to return.",
     )
-    name_contains: Optional[str] = Field(
+    name_contains: str | None = Field(
         default=None,
         description="Optional case-insensitive substring filter for function names.",
     )
-    segment: Optional[str] = Field(
+    segment: str | None = Field(
         default=None,
         description="Optional segment name filter, for example '.text' or '__text'.",
     )
@@ -150,14 +147,14 @@ class ListFunctionsInput(InstanceTargetInput):
 class DecompileFunctionInput(InstanceTargetInput):
     """Input for decompile_function."""
 
-    address: Optional[str] = Field(
+    address: str | None = Field(
         default=None,
         description=(
             "Function address like '0x401000'. Provide either address or name. "
             "The address may be the function start or any address inside the function."
         ),
     )
-    name: Optional[str] = Field(
+    name: str | None = Field(
         default=None,
         description="Function name like 'main'. Provide either address or name.",
     )
@@ -173,11 +170,11 @@ class DecompileFunctionInput(InstanceTargetInput):
 class GetXrefsInput(InstanceTargetInput):
     """Input for get_xrefs."""
 
-    address: Optional[str] = Field(
+    address: str | None = Field(
         default=None,
         description="Target address like '0x401000'. Provide either address or name.",
     )
-    name: Optional[str] = Field(
+    name: str | None = Field(
         default=None,
         description="Target symbol or function name. Provide either address or name.",
     )
@@ -207,14 +204,14 @@ class ExecuteScriptInput(InstanceTargetInput):
         strict=True,
     )
 
-    code: Optional[str] = Field(
+    code: str | None = Field(
         default=None,
         description=(
             "Python code to execute inside IDA. Provide either code or script_path. "
             "For multi-line code, send a single string with embedded newlines."
         ),
     )
-    script_path: Optional[str] = Field(
+    script_path: str | None = Field(
         default=None,
         description=(
             "Path to a Python script file to execute inside IDA. Provide either code or "
@@ -237,7 +234,7 @@ class ExecuteScriptInput(InstanceTargetInput):
     )
 
     @model_validator(mode="after")
-    def validate_execute_request(self) -> "ExecuteScriptInput":
+    def validate_execute_request(self) -> ExecuteScriptInput:
         self.to_execute_request()
         return self
 
@@ -258,13 +255,13 @@ def get_ida_host() -> str:
     return os.environ.get("IDA_SCRIPT_MCP_HOST", DEFAULT_IDA_HOST)
 
 
-def get_ida_port() -> Optional[int]:
+def get_ida_port() -> int | None:
     """Get IDA plugin port from environment."""
     port = os.environ.get("IDA_SCRIPT_MCP_PORT")
     return int(port) if port else None
 
 
-def get_ida_instance_id() -> Optional[str]:
+def get_ida_instance_id() -> str | None:
     """Get IDA instance id from environment."""
     return os.environ.get("IDA_SCRIPT_MCP_INSTANCE_ID")
 
@@ -305,7 +302,7 @@ def list_instances() -> dict[str, dict[str, Any]]:
     try:
         if not INSTANCE_INFO_FILE.exists():
             return {}
-        with open(INSTANCE_INFO_FILE, "r", encoding="utf-8") as handle:
+        with open(INSTANCE_INFO_FILE, encoding="utf-8") as handle:
             instances = json.load(handle)
     except Exception:
         return {}
@@ -344,14 +341,14 @@ def _sorted_instance_records(instances: dict[str, dict[str, Any]]) -> list[dict[
     return records
 
 
-def _lookup_instance_id_by_port(port: int) -> Optional[str]:
+def _lookup_instance_id_by_port(port: int) -> str | None:
     for instance_id, info in list_instances().items():
         if info.get("port") == port:
             return instance_id
     return None
 
 
-def find_instance_port(instance_id: Optional[str] = None) -> tuple[Optional[int], str]:
+def find_instance_port(instance_id: str | None = None) -> tuple[int | None, str]:
     """Resolve an IDA instance id to a port.
 
     Returns:
@@ -400,7 +397,10 @@ def find_instance_port(instance_id: Optional[str] = None) -> tuple[Optional[int]
         return info.get("port"), current_id
 
     instance_list = [
-        f"- {record['instance_id']}: {record.get('database', 'unknown')} (port {record.get('port')})"
+        (
+            f"- {record['instance_id']}: {record.get('database', 'unknown')} "
+            f"(port {record.get('port')})"
+        )
         for record in _sorted_instance_records(instances)
     ]
     return None, (
@@ -409,14 +409,16 @@ def find_instance_port(instance_id: Optional[str] = None) -> tuple[Optional[int]
 
 
 def resolve_target(
-    params: Optional[InstanceTargetInput] = None,
+    params: InstanceTargetInput | None = None,
     *,
-    instance_id: Optional[str] = None,
-    port: Optional[int] = None,
-) -> tuple[Optional[int], Optional[str], str]:
+    instance_id: str | None = None,
+    port: int | None = None,
+) -> tuple[int | None, str | None, str]:
     """Resolve a target selection to a port and instance id when possible."""
     selected_port = port if port is not None else (params.port if params else None)
-    selected_instance_id = instance_id if instance_id is not None else (params.instance_id if params else None)
+    selected_instance_id = (
+        instance_id if instance_id is not None else (params.instance_id if params else None)
+    )
 
     if selected_port is not None:
         matched_instance_id = _lookup_instance_id_by_port(selected_port)
@@ -432,9 +434,9 @@ def make_ida_request(
     endpoint: str,
     *,
     method: str = "GET",
-    data: Optional[dict[str, Any]] = None,
-    host: Optional[str] = None,
-    port: Optional[int] = None,
+    data: dict[str, Any] | None = None,
+    host: str | None = None,
+    port: int | None = None,
     timeout: float = 60.0,
 ) -> dict[str, Any]:
     """Make an HTTP request to the IDA plugin."""
@@ -460,7 +462,7 @@ def make_ida_request(
         if not raw_data:
             return {}
         return json.loads(raw_data)
-    except (TimeoutError, socket.timeout) as exc:
+    except TimeoutError as exc:
         raise IdaPluginResponseTimeout(effective_host, effective_port, timeout) from exc
     except Exception as exc:
         raise RuntimeError(
@@ -473,9 +475,9 @@ def make_ida_request(
 def _tool_error(
     message: str,
     *,
-    hint: Optional[str] = None,
-    instance_id: Optional[str] = None,
-    port: Optional[int] = None,
+    hint: str | None = None,
+    instance_id: str | None = None,
+    port: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"error": message}
     if hint:
@@ -548,7 +550,9 @@ async def get_ida_database_info(params: DatabaseInfoInput) -> dict[str, Any]:
         result.setdefault("port", port)
         return result
     except Exception as exc:
-        return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
+        return _tool_error(
+            str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port
+        )
 
 
 @mcp.tool(
@@ -587,7 +591,9 @@ async def list_functions(params: ListFunctionsInput) -> dict[str, Any]:
         result.setdefault("port", port)
         return result
     except Exception as exc:
-        return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
+        return _tool_error(
+            str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port
+        )
 
 
 @mcp.tool(
@@ -604,9 +610,11 @@ async def decompile_function(params: DecompileFunctionInput) -> dict[str, Any]:
     """Decompile a function by address or name.
 
     Examples:
-        - ``decompile_function({"address": "0x401000"})`` decompiles the function containing 0x401000.
+        - ``decompile_function({"address": "0x401000"})`` decompiles the function
+          containing 0x401000.
         - ``decompile_function({"name": "main"})`` decompiles the function named ``main``.
-        - ``decompile_function({"address": "0x401000", "include_disassembly": true})`` also returns assembly.
+        - ``decompile_function({"address": "0x401000", "include_disassembly": true})``
+          also returns assembly.
     """
     if not params.address and not params.name:
         return _tool_error("Provide either 'address' or 'name'.")
@@ -628,7 +636,9 @@ async def decompile_function(params: DecompileFunctionInput) -> dict[str, Any]:
         result.setdefault("port", port)
         return result
     except Exception as exc:
-        return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
+        return _tool_error(
+            str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port
+        )
 
 
 @mcp.tool(
@@ -646,8 +656,10 @@ async def get_xrefs(params: GetXrefsInput) -> dict[str, Any]:
 
     Examples:
         - ``get_xrefs({"address": "0x401000"})`` returns xrefs to 0x401000.
-        - ``get_xrefs({"name": "CreateFileW", "direction": "to"})`` finds callers and data refs to a symbol.
-        - ``get_xrefs({"address": "0x401000", "direction": "from", "xref_kind": "code"})`` returns outgoing code refs.
+        - ``get_xrefs({"name": "CreateFileW", "direction": "to"})`` finds callers
+          and data refs to a symbol.
+        - ``get_xrefs({"address": "0x401000", "direction": "from", "xref_kind": "code"})``
+          returns outgoing code refs.
     """
     if not params.address and not params.name:
         return _tool_error("Provide either 'address' or 'name'.")
@@ -671,7 +683,9 @@ async def get_xrefs(params: GetXrefsInput) -> dict[str, Any]:
         result.setdefault("port", port)
         return result
     except Exception as exc:
-        return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
+        return _tool_error(
+            str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port
+        )
 
 
 @mcp.tool(
@@ -725,8 +739,8 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
 class ApplyWorkerChangesInput(ApplyChangesRequest):
     """Input for apply_worker_changes; dry_run defaults to true."""
 
-    instance_id: Optional[str] = None
-    port: Optional[int] = Field(default=None, ge=1, le=65535)
+    instance_id: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
 
 
 @mcp.tool(
@@ -756,7 +770,9 @@ async def apply_worker_changes(params: ApplyWorkerChangesInput) -> dict[str, Any
         result.setdefault("port", port)
         return result
     except Exception as exc:
-        return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
+        return _tool_error(
+            str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port
+        )
 
 
 def main() -> None:

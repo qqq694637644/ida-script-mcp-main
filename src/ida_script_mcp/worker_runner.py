@@ -6,8 +6,9 @@ import json
 import os
 import sys
 import traceback
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 try:
     from .change_protocol import ChangeSet, fingerprint_from_metadata
@@ -21,8 +22,15 @@ except ImportError:  # pragma: no cover - copied runner inside IDA job dir
     for candidate in (str(package_parent), str(current_dir)):
         if candidate not in sys.path:
             sys.path.insert(0, candidate)
-    from ida_script_mcp.change_protocol import ChangeSet, fingerprint_from_metadata  # type: ignore[no-redef]
-    from ida_script_mcp.change_recorder import ChangeRecorder, McpChangesApi, RecorderError  # type: ignore[no-redef]
+    from ida_script_mcp.change_protocol import (  # type: ignore[no-redef]
+        ChangeSet,
+        fingerprint_from_metadata,
+    )
+    from ida_script_mcp.change_recorder import (  # type: ignore[no-redef]
+        ChangeRecorder,
+        McpChangesApi,
+        RecorderError,
+    )
     from ida_script_mcp.execution import ScriptExecutor  # type: ignore[no-redef]
     from ida_script_mcp.isolated_protocol import IsolatedExecuteRequest  # type: ignore[no-redef]
     from ida_script_mcp.protocol import ExecuteResult, ExecutionError  # type: ignore[no-redef]
@@ -150,7 +158,9 @@ def _worker_start_error_result(
     return ExecuteResult(
         status="worker_start_error",
         result=None,
-        error=ExecutionError(type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc()),
+        error=ExecutionError(
+            type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc()
+        ),
         timeout_seconds=request.execute.timeout_seconds,
         isolated=True,
         job_id=request.job_id,
@@ -176,13 +186,19 @@ def run(request_path: Path) -> int:
 
     try:
         result = ScriptExecutor(lambda: namespace).execute(request.execute)
-        if result.status == "script_error" and result.error and result.error.type == "RecorderError":
+        if (
+            result.status == "script_error"
+            and result.error
+            and result.error.type == "RecorderError"
+        ):
             result = result.model_copy(update={"status": "recorder_error"})
     except RecorderError as exc:
         result = ExecuteResult(
             status="recorder_error",
             result=None,
-            error=ExecutionError(type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc()),
+            error=ExecutionError(
+                type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc()
+            ),
             timeout_seconds=request.execute.timeout_seconds,
             isolated=True,
             job_id=request.job_id,
@@ -219,7 +235,9 @@ def run(request_path: Path) -> int:
         error_result = ExecuteResult(
             status="recorder_error",
             result=None,
-            error=ExecutionError(type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc()),
+            error=ExecutionError(
+                type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc()
+            ),
             timeout_seconds=request.execute.timeout_seconds,
             isolated=True,
             job_id=request.job_id,

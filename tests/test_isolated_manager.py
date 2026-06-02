@@ -50,7 +50,9 @@ def test_dirty_gui_database_is_rejected_without_launch(tmp_path):
         launched = True
         return FakeProcess()
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen)
+    manager = IsolatedExecutionManager(
+        work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen
+    )
     result = manager.execute(
         ExecuteRequest(code="1"),
         gui_context=_gui_context(db, dirty=True),
@@ -72,7 +74,9 @@ def test_unknown_dirty_state_is_rejected_without_launch(tmp_path):
         launched = True
         return FakeProcess()
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen)
+    manager = IsolatedExecutionManager(
+        work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen
+    )
     result = manager.execute(
         ExecuteRequest(code="1"),
         gui_context=_gui_context(db, dirty=None, unsaved=None, dirty_state_known=False),
@@ -95,7 +99,9 @@ def test_missing_database_identity_is_source_error_without_launch(tmp_path):
         launched = True
         return FakeProcess()
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen)
+    manager = IsolatedExecutionManager(
+        work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen
+    )
     result = manager.execute(
         ExecuteRequest(code="1"),
         gui_context=_gui_context(db, database_identity_known=False),

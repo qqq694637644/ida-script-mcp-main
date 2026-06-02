@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 try:
     from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
@@ -60,8 +60,8 @@ if HAS_PYDANTIC:
 
         model_config = ConfigDict(extra="forbid", strict=True)
 
-        code: Optional[str] = None
-        script_path: Optional[str] = None
+        code: str | None = None
+        script_path: str | None = None
         capture_output: StrictBool = True
         timeout_seconds: int = Field(
             default=DEFAULT_EXECUTE_TIMEOUT_SECONDS,
@@ -70,13 +70,12 @@ if HAS_PYDANTIC:
         )
 
         @model_validator(mode="after")
-        def validate_source(self) -> "ExecuteRequest":
+        def validate_source(self) -> ExecuteRequest:
             has_code = self.code is not None and bool(self.code.strip())
             has_script_path = self.script_path is not None and bool(self.script_path.strip())
             if has_code == has_script_path:
                 raise ValueError("Provide exactly one of code or script_path")
             return self
-
 
     class ExecutionError(BaseModel):
         """Structured execution-system error details."""
@@ -85,8 +84,7 @@ if HAS_PYDANTIC:
 
         type: str
         message: str
-        traceback: Optional[str] = None
-
+        traceback: str | None = None
 
     class ExecuteResult(BaseModel):
         """Structured result returned by isolated script execution."""
@@ -97,15 +95,15 @@ if HAS_PYDANTIC:
         result: Any = None
         stdout: str = ""
         stderr: str = ""
-        error: Optional[ExecutionError] = None
+        error: ExecutionError | None = None
         duration_seconds: float = Field(default=0.0, ge=0.0)
         timeout_seconds: int = Field(default=DEFAULT_EXECUTE_TIMEOUT_SECONDS, ge=1)
-        instance_id: Optional[str] = None
-        port: Optional[int] = None
+        instance_id: str | None = None
+        port: int | None = None
         isolated: bool = True
-        job_id: Optional[str] = None
-        worker_pid: Optional[int] = None
-        worker_exit_code: Optional[int] = None
+        job_id: str | None = None
+        worker_pid: int | None = None
+        worker_exit_code: int | None = None
         killed: bool = False
         hard_timeout: bool = False
         changes: list[ChangeOperation] = Field(default_factory=list)
@@ -117,46 +115,39 @@ else:
     class _ValidationError(ValueError):
         """Fallback validation error used only when pydantic is unavailable."""
 
-
     def _reject_extra(data: dict[str, Any], allowed: set[str], model_name: str) -> None:
         extra = set(data) - allowed
         if extra:
             raise _ValidationError(f"{model_name} forbids extra fields: {sorted(extra)!r}")
-
 
     def _strict_bool(value: Any, field_name: str) -> bool:
         if type(value) is not bool:
             raise _ValidationError(f"{field_name} must be a strict bool")
         return value
 
-
-    def _optional_str(value: Any, field_name: str) -> Optional[str]:
+    def _optional_str(value: Any, field_name: str) -> str | None:
         if value is None:
             return None
         if not isinstance(value, str):
             raise _ValidationError(f"{field_name} must be a string")
         return value
-
 
     def _required_str(value: Any, field_name: str) -> str:
         if not isinstance(value, str):
             raise _ValidationError(f"{field_name} must be a string")
         return value
 
-
-    def _optional_int(value: Any, field_name: str) -> Optional[int]:
+    def _optional_int(value: Any, field_name: str) -> int | None:
         if value is None:
             return None
         if type(value) is bool:
             raise _ValidationError(f"{field_name} must be an int")
         return int(value)
 
-
     def _required_int(value: Any, field_name: str) -> int:
         if value is None or type(value) is bool:
             raise _ValidationError(f"{field_name} must be an int")
         return int(value)
-
 
     def _duration(value: Any) -> float:
         result = float(value)
@@ -164,13 +155,11 @@ else:
             raise _ValidationError("duration_seconds must be >= 0")
         return result
 
-
     def _timeout(value: Any) -> int:
         timeout = _required_int(value, "timeout_seconds")
         if timeout < 1 or timeout > MAX_EXECUTE_TIMEOUT_SECONDS:
             raise _ValidationError("timeout_seconds out of range")
         return timeout
-
 
     def _dump_value(value: Any) -> Any:
         if hasattr(value, "model_dump"):
@@ -180,7 +169,6 @@ else:
         if isinstance(value, dict):
             return {str(key): _dump_value(inner) for key, inner in value.items()}
         return value
-
 
     def _change_operation(value: Any) -> Any:
         if hasattr(value, "model_dump"):
@@ -200,7 +188,6 @@ else:
             return coerce_change_operation(value)
         raise _ValidationError("change operation must be a dict")
 
-
     class _SimpleModel:
         _fields: tuple[str, ...] = ()
 
@@ -219,7 +206,7 @@ else:
         def model_dump(
             self,
             mode: str = "json",
-            exclude: Optional[set[str]] = None,
+            exclude: set[str] | None = None,
         ) -> dict[str, Any]:
             exclude = exclude or set()
             return {
@@ -231,12 +218,11 @@ else:
         def model_dump_json(self) -> str:
             return json.dumps(self.model_dump(mode="json"), ensure_ascii=False)
 
-        def model_copy(self, *, update: Optional[dict[str, Any]] = None):
+        def model_copy(self, *, update: dict[str, Any] | None = None):
             data = self.model_dump(mode="json")
             if update:
                 data.update(update)
             return self.__class__.model_validate(data)
-
 
     class ExecuteRequest(_SimpleModel):
         """Strict request body for IDAPython execution."""
@@ -246,8 +232,8 @@ else:
         def __init__(
             self,
             *,
-            code: Optional[str] = None,
-            script_path: Optional[str] = None,
+            code: str | None = None,
+            script_path: str | None = None,
             capture_output: bool = True,
             timeout_seconds: int = DEFAULT_EXECUTE_TIMEOUT_SECONDS,
             **extra: Any,
@@ -263,7 +249,6 @@ else:
             if has_code == has_script_path:
                 raise _ValidationError("Provide exactly one of code or script_path")
 
-
     class ExecutionError(_SimpleModel):
         """Structured execution-system error details."""
 
@@ -274,7 +259,7 @@ else:
             *,
             type: str,
             message: str,
-            traceback: Optional[str] = None,
+            traceback: str | None = None,
             **extra: Any,
         ):
             if extra:
@@ -282,7 +267,6 @@ else:
             self.type = _required_str(type, "type")
             self.message = _required_str(message, "message")
             self.traceback = _optional_str(traceback, "traceback")
-
 
     class ExecuteResult(_SimpleModel):
         """Structured result returned by isolated script execution."""
@@ -315,19 +299,19 @@ else:
             result: Any = None,
             stdout: str = "",
             stderr: str = "",
-            error: Optional[ExecutionError | dict[str, Any]] = None,
+            error: ExecutionError | dict[str, Any] | None = None,
             duration_seconds: float = 0.0,
             timeout_seconds: int = DEFAULT_EXECUTE_TIMEOUT_SECONDS,
-            instance_id: Optional[str] = None,
-            port: Optional[int] = None,
+            instance_id: str | None = None,
+            port: int | None = None,
             isolated: bool = True,
-            job_id: Optional[str] = None,
-            worker_pid: Optional[int] = None,
-            worker_exit_code: Optional[int] = None,
+            job_id: str | None = None,
+            worker_pid: int | None = None,
+            worker_exit_code: int | None = None,
             killed: bool = False,
             hard_timeout: bool = False,
-            changes: Optional[list[Any]] = None,
-            artifacts: Optional[dict[str, Any]] = None,
+            changes: list[Any] | None = None,
+            artifacts: dict[str, Any] | None = None,
             artifacts_retained: bool = True,
             **extra: Any,
         ):

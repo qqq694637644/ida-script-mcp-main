@@ -12,7 +12,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .change_protocol import ChangeSet
 from .isolated_protocol import IsolatedExecuteRequest
@@ -22,8 +22,7 @@ from .protocol import ExecuteRequest, ExecuteResult, ExecutionError
 HARD_TIMEOUT_MARGIN_SECONDS = 5
 
 
-
-def _sha256_file(path: Path) -> Optional[str]:
+def _sha256_file(path: Path) -> str | None:
     try:
         hasher = hashlib.sha256()
         with path.open("rb") as handle:
@@ -54,7 +53,7 @@ def _keep_jobs_enabled() -> bool:
     raise ValueError("IDA_SCRIPT_MCP_KEEP_JOBS must be exactly 0 or 1")
 
 
-def _discover_ida_path() -> Optional[Path]:
+def _discover_ida_path() -> Path | None:
     explicit = os.environ.get("IDA_SCRIPT_MCP_IDA_PATH")
     if explicit:
         path = Path(explicit)
@@ -62,7 +61,11 @@ def _discover_ida_path() -> Optional[Path]:
     mode = os.environ.get("IDA_SCRIPT_MCP_WORKER_MODE", "auto").lower()
     if mode not in {"auto", "ida", "idat"}:
         return None
-    names = ["idat64", "idat", "ida64", "ida"] if mode == "auto" else (["ida64", "ida"] if mode == "ida" else ["idat64", "idat"])
+    names = (
+        ["idat64", "idat", "ida64", "ida"]
+        if mode == "auto"
+        else (["ida64", "ida"] if mode == "ida" else ["idat64", "idat"])
+    )
     if sys.platform == "win32":
         names = [f"{name}.exe" for name in names]
     for name in names:
@@ -78,8 +81,8 @@ class IsolatedExecutionManager:
     def __init__(
         self,
         *,
-        work_dir: Optional[Path] = None,
-        ida_path: Optional[Path] = None,
+        work_dir: Path | None = None,
+        ida_path: Path | None = None,
         hard_timeout_margin_seconds: int = HARD_TIMEOUT_MARGIN_SECONDS,
         popen=subprocess.Popen,
         kill_tree=kill_process_tree,
@@ -95,8 +98,8 @@ class IsolatedExecutionManager:
         request: ExecuteRequest,
         *,
         gui_context: dict[str, Any],
-        instance_id: Optional[str],
-        port: Optional[int],
+        instance_id: str | None,
+        port: int | None,
         collect_changes: bool = True,
     ) -> ExecuteResult:
         started = time.monotonic()
@@ -140,7 +143,16 @@ class IsolatedExecutionManager:
 
         database_path_value = gui_context.get("database_path")
         if not database_path_value:
-            return self._failure("source_error", request, started, "MissingDatabasePath", "GUI plugin did not report a saved database_path.", instance_id=instance_id, port=port, job_id=job_id)
+            return self._failure(
+                "source_error",
+                request,
+                started,
+                "MissingDatabasePath",
+                "GUI plugin did not report a saved database_path.",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
         database_path = Path(str(database_path_value))
         if not database_path.exists() or not database_path.is_file():
             return self._failure(
@@ -182,7 +194,19 @@ class IsolatedExecutionManager:
 
         ida_path = self.ida_path or _discover_ida_path()
         if ida_path is None or not ida_path.exists():
-            return self._failure("worker_start_error", request, started, "IdaExecutableNotConfigured", "Set IDA_SCRIPT_MCP_IDA_PATH to idat/idat64/ida64; no GUI /execute fallback is allowed.", instance_id=instance_id, port=port, job_id=job_id)
+            return self._failure(
+                "worker_start_error",
+                request,
+                started,
+                "IdaExecutableNotConfigured",
+                (
+                    "Set IDA_SCRIPT_MCP_IDA_PATH to idat/idat64/ida64; "
+                    "no GUI /execute fallback is allowed."
+                ),
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+            )
 
         job_dir = self.work_dir / job_id
         artifacts = {
@@ -201,11 +225,51 @@ class IsolatedExecutionManager:
             database_copy_path = job_dir / f"database{database_path.suffix or '.i64'}"
             shutil.copy2(database_path, database_copy_path)
         except FileNotFoundError as exc:
-            result = self._failure("source_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
-            return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+            result = self._failure(
+                "source_error",
+                request,
+                started,
+                type(exc).__name__,
+                str(exc),
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
+            return self._finalize_job_result(
+                result,
+                request,
+                started,
+                job_dir=job_dir,
+                keep_jobs=keep_jobs,
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
         except Exception as exc:
-            result = self._failure("worker_start_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
-            return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+            result = self._failure(
+                "worker_start_error",
+                request,
+                started,
+                type(exc).__name__,
+                str(exc),
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
+            return self._finalize_job_result(
+                result,
+                request,
+                started,
+                job_dir=job_dir,
+                keep_jobs=keep_jobs,
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
 
         try:
             execute_request = self._materialize_source(request, job_dir)
@@ -221,10 +285,32 @@ class IsolatedExecutionManager:
             )
             _json_dump_atomic(job_dir / "request.json", isolated_request.model_dump(mode="json"))
             self._write_runner(job_dir / "runner.py")
-            _json_dump_atomic(job_dir / "metadata.json", {"job_id": job_id, "gui_context": gui_context})
+            _json_dump_atomic(
+                job_dir / "metadata.json", {"job_id": job_id, "gui_context": gui_context}
+            )
         except Exception as exc:
-            result = self._failure("worker_start_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
-            return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+            result = self._failure(
+                "worker_start_error",
+                request,
+                started,
+                type(exc).__name__,
+                str(exc),
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
+            return self._finalize_job_result(
+                result,
+                request,
+                started,
+                job_dir=job_dir,
+                keep_jobs=keep_jobs,
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
 
         stdout_path = job_dir / "stdout.txt"
         stderr_path = job_dir / "stderr.txt"
@@ -234,24 +320,100 @@ class IsolatedExecutionManager:
         env.setdefault("PYTHONIOENCODING", "utf-8")
         try:
             with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
-                popen_kwargs: dict[str, Any] = {"stdout": stdout_handle, "stderr": stderr_handle, "env": env, "cwd": str(job_dir)}
+                popen_kwargs: dict[str, Any] = {
+                    "stdout": stdout_handle,
+                    "stderr": stderr_handle,
+                    "env": env,
+                    "cwd": str(job_dir),
+                }
                 if sys.platform != "win32":
                     popen_kwargs["start_new_session"] = True
                 process = self._popen(args, **popen_kwargs)
         except Exception as exc:
-            result = self._failure("worker_start_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
-            return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+            result = self._failure(
+                "worker_start_error",
+                request,
+                started,
+                type(exc).__name__,
+                str(exc),
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
+            return self._finalize_job_result(
+                result,
+                request,
+                started,
+                job_dir=job_dir,
+                keep_jobs=keep_jobs,
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
 
         wait_seconds = request.timeout_seconds + self.hard_timeout_margin_seconds
         try:
             exit_code = process.wait(timeout=wait_seconds)
         except subprocess.TimeoutExpired:
             killed = self._kill_tree(process)
-            result = ExecuteResult(status="timeout", result=None, stdout=self._safe_read(stdout_path), stderr=self._safe_read(stderr_path), error=ExecutionError(type="WorkerHardTimeout", message=f"Worker exceeded hard timeout of {wait_seconds} seconds", traceback=None), duration_seconds=max(0.0, time.monotonic() - started), timeout_seconds=request.timeout_seconds, instance_id=instance_id, port=port, isolated=True, job_id=job_id, worker_pid=getattr(process, "pid", None), worker_exit_code=process.poll(), killed=killed, hard_timeout=True, artifacts=artifacts)
-            return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+            result = ExecuteResult(
+                status="timeout",
+                result=None,
+                stdout=self._safe_read(stdout_path),
+                stderr=self._safe_read(stderr_path),
+                error=ExecutionError(
+                    type="WorkerHardTimeout",
+                    message=f"Worker exceeded hard timeout of {wait_seconds} seconds",
+                    traceback=None,
+                ),
+                duration_seconds=max(0.0, time.monotonic() - started),
+                timeout_seconds=request.timeout_seconds,
+                instance_id=instance_id,
+                port=port,
+                isolated=True,
+                job_id=job_id,
+                worker_pid=getattr(process, "pid", None),
+                worker_exit_code=process.poll(),
+                killed=killed,
+                hard_timeout=True,
+                artifacts=artifacts,
+            )
+            return self._finalize_job_result(
+                result,
+                request,
+                started,
+                job_dir=job_dir,
+                keep_jobs=keep_jobs,
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                artifacts=artifacts,
+            )
 
-        result = self._read_worker_result(request, started, job_id=job_id, exit_code=exit_code, worker_pid=getattr(process, "pid", None), instance_id=instance_id, port=port, job_dir=job_dir, artifacts=artifacts)
-        return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+        result = self._read_worker_result(
+            request,
+            started,
+            job_id=job_id,
+            exit_code=exit_code,
+            worker_pid=getattr(process, "pid", None),
+            instance_id=instance_id,
+            port=port,
+            job_dir=job_dir,
+            artifacts=artifacts,
+        )
+        return self._finalize_job_result(
+            result,
+            request,
+            started,
+            job_dir=job_dir,
+            keep_jobs=keep_jobs,
+            instance_id=instance_id,
+            port=port,
+            job_id=job_id,
+            artifacts=artifacts,
+        )
 
     def _materialize_source(self, request: ExecuteRequest, job_dir: Path) -> ExecuteRequest:
         if request.code is not None:
@@ -277,27 +439,102 @@ class IsolatedExecutionManager:
         ):
             shutil.copy2(source_dir / module_name, package_dir / module_name)
 
-    def _read_worker_result(self, request: ExecuteRequest, started: float, *, job_id: str, exit_code: int, worker_pid: Optional[int], instance_id: Optional[str], port: Optional[int], job_dir: Path, artifacts: dict[str, str]) -> ExecuteResult:
+    def _read_worker_result(
+        self,
+        request: ExecuteRequest,
+        started: float,
+        *,
+        job_id: str,
+        exit_code: int,
+        worker_pid: int | None,
+        instance_id: str | None,
+        port: int | None,
+        job_dir: Path,
+        artifacts: dict[str, str],
+    ) -> ExecuteResult:
         result_path = job_dir / "result.json"
         changes_path = job_dir / "changes.json"
         stdout_path = job_dir / "stdout.txt"
         stderr_path = job_dir / "stderr.txt"
         if not result_path.exists():
             status = "worker_crashed" if exit_code != 0 else "worker_result_missing"
-            return self._failure(status, request, started, "WorkerResultMissing", "Worker exited without result.json", instance_id=instance_id, port=port, job_id=job_id, worker_pid=worker_pid, worker_exit_code=exit_code, stdout=self._safe_read(stdout_path), stderr=self._safe_read(stderr_path), artifacts=artifacts)
+            return self._failure(
+                status,
+                request,
+                started,
+                "WorkerResultMissing",
+                "Worker exited without result.json",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                worker_pid=worker_pid,
+                worker_exit_code=exit_code,
+                stdout=self._safe_read(stdout_path),
+                stderr=self._safe_read(stderr_path),
+                artifacts=artifacts,
+            )
         try:
             result = ExecuteResult.model_validate_json(result_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            return self._failure("worker_result_missing", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, worker_pid=worker_pid, worker_exit_code=exit_code, artifacts=artifacts)
+            return self._failure(
+                "worker_result_missing",
+                request,
+                started,
+                type(exc).__name__,
+                str(exc),
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                worker_pid=worker_pid,
+                worker_exit_code=exit_code,
+                artifacts=artifacts,
+            )
         changes = result.changes
         if changes_path.exists():
             try:
-                changes = ChangeSet.model_validate_json(changes_path.read_text(encoding="utf-8")).operations
+                changes = ChangeSet.model_validate_json(
+                    changes_path.read_text(encoding="utf-8")
+                ).operations
             except Exception as exc:
-                return self._failure("recorder_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, worker_pid=worker_pid, worker_exit_code=exit_code, artifacts=artifacts)
+                return self._failure(
+                    "recorder_error",
+                    request,
+                    started,
+                    type(exc).__name__,
+                    str(exc),
+                    instance_id=instance_id,
+                    port=port,
+                    job_id=job_id,
+                    worker_pid=worker_pid,
+                    worker_exit_code=exit_code,
+                    artifacts=artifacts,
+                )
         if exit_code != 0 and result.status == "ok":
-            return self._failure("worker_crashed", request, started, "WorkerCrashed", f"Worker exited with code {exit_code}", instance_id=instance_id, port=port, job_id=job_id, worker_pid=worker_pid, worker_exit_code=exit_code, artifacts=artifacts)
-        return result.model_copy(update={"instance_id": instance_id, "port": port, "isolated": True, "job_id": job_id, "worker_pid": worker_pid, "worker_exit_code": exit_code, "changes": changes, "artifacts": artifacts})
+            return self._failure(
+                "worker_crashed",
+                request,
+                started,
+                "WorkerCrashed",
+                f"Worker exited with code {exit_code}",
+                instance_id=instance_id,
+                port=port,
+                job_id=job_id,
+                worker_pid=worker_pid,
+                worker_exit_code=exit_code,
+                artifacts=artifacts,
+            )
+        return result.model_copy(
+            update={
+                "instance_id": instance_id,
+                "port": port,
+                "isolated": True,
+                "job_id": job_id,
+                "worker_pid": worker_pid,
+                "worker_exit_code": exit_code,
+                "changes": changes,
+                "artifacts": artifacts,
+            }
+        )
 
     @staticmethod
     def _safe_read(path: Path) -> str:
@@ -306,7 +543,19 @@ class IsolatedExecutionManager:
         except Exception:
             return ""
 
-    def _finalize_job_result(self, result: ExecuteResult, request: ExecuteRequest, started: float, *, job_dir: Path, keep_jobs: bool, instance_id: Optional[str], port: Optional[int], job_id: str, artifacts: dict[str, str]) -> ExecuteResult:
+    def _finalize_job_result(
+        self,
+        result: ExecuteResult,
+        request: ExecuteRequest,
+        started: float,
+        *,
+        job_dir: Path,
+        keep_jobs: bool,
+        instance_id: str | None,
+        port: int | None,
+        job_id: str,
+        artifacts: dict[str, str],
+    ) -> ExecuteResult:
         if keep_jobs:
             return result.model_copy(update={"artifacts_retained": True})
         try:
@@ -329,5 +578,36 @@ class IsolatedExecutionManager:
             )
         return result.model_copy(update={"artifacts": {}, "artifacts_retained": False})
 
-    def _failure(self, status: str, request: ExecuteRequest, started: float, error_type: str, message: str, *, instance_id: Optional[str] = None, port: Optional[int] = None, job_id: Optional[str] = None, worker_pid: Optional[int] = None, worker_exit_code: Optional[int] = None, stdout: str = "", stderr: str = "", artifacts: Optional[dict[str, str]] = None) -> ExecuteResult:
-        return ExecuteResult(status=status, result=None, stdout=stdout, stderr=stderr, error=ExecutionError(type=error_type, message=message, traceback=None), duration_seconds=max(0.0, time.monotonic() - started), timeout_seconds=request.timeout_seconds, instance_id=instance_id, port=port, isolated=True, job_id=job_id, worker_pid=worker_pid, worker_exit_code=worker_exit_code, artifacts=artifacts or {})
+    def _failure(
+        self,
+        status: str,
+        request: ExecuteRequest,
+        started: float,
+        error_type: str,
+        message: str,
+        *,
+        instance_id: str | None = None,
+        port: int | None = None,
+        job_id: str | None = None,
+        worker_pid: int | None = None,
+        worker_exit_code: int | None = None,
+        stdout: str = "",
+        stderr: str = "",
+        artifacts: dict[str, str] | None = None,
+    ) -> ExecuteResult:
+        return ExecuteResult(
+            status=status,
+            result=None,
+            stdout=stdout,
+            stderr=stderr,
+            error=ExecutionError(type=error_type, message=message, traceback=None),
+            duration_seconds=max(0.0, time.monotonic() - started),
+            timeout_seconds=request.timeout_seconds,
+            instance_id=instance_id,
+            port=port,
+            isolated=True,
+            job_id=job_id,
+            worker_pid=worker_pid,
+            worker_exit_code=worker_exit_code,
+            artifacts=artifacts or {},
+        )
