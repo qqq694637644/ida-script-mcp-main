@@ -68,3 +68,34 @@ def test_explicit_mcp_changes_applies_and_records():
 
     assert recorder.operations[0].op == "rename"
     assert recorder.operations[0].source == "explicit_api"
+
+
+def test_monkeypatch_records_ida_name_direct_calls():
+    ida_name = types.SimpleNamespace(set_name=lambda *_args: True)
+    recorder = ChangeRecorder()
+    recorder.install({"ida_name": ida_name})
+
+    try:
+        assert ida_name.set_name(0x1000, "main", 0) is True
+    finally:
+        recorder.uninstall()
+
+    assert len(recorder.operations) == 1
+    assert recorder.operations[0].op == "rename"
+    assert recorder.operations[0].source == "monkeypatch"
+
+
+def test_explicit_mcp_changes_suppresses_underlying_monkeypatch_recording():
+    ida_name = types.SimpleNamespace(set_name=lambda *_args: True)
+    recorder = ChangeRecorder()
+    recorder.install({"ida_name": ida_name})
+    api = McpChangesApi(recorder, {"ida_name": ida_name})
+
+    try:
+        assert api.rename(0x1000, "entry") is True
+    finally:
+        recorder.uninstall()
+
+    assert len(recorder.operations) == 1
+    assert recorder.operations[0].op == "rename"
+    assert recorder.operations[0].source == "explicit_api"

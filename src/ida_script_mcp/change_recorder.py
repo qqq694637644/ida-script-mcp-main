@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import itertools
-from typing import Any, Callable, Optional
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator, Optional
 
 from .change_protocol import (
     ChangeOperation,
@@ -26,6 +27,20 @@ class ChangeRecorder:
         self.operations: list[ChangeOperation] = []
         self._counter = itertools.count(1)
         self._patches: list[tuple[Any, str, Any]] = []
+        self._suppress_depth = 0
+
+    @contextmanager
+    def suppress_recording(self) -> Iterator[None]:
+        """Temporarily suppress monkeypatch recording while preserving API effects."""
+        self._suppress_depth += 1
+        try:
+            yield
+        finally:
+            self._suppress_depth -= 1
+
+    @property
+    def recording_suppressed(self) -> bool:
+        return self._suppress_depth > 0
 
     def _op_id(self) -> str:
         return f"op-{next(self._counter):06d}"
@@ -59,23 +74,21 @@ class ChangeRecorder:
         self.operations.append(op)
         return op
 
-    def install(self, modules: dict[str, Any], *, patch_explicit_api_modules: bool = True) -> None:
+    def install(self, modules: dict[str, Any]) -> None:
         """Patch common write APIs in provided IDAPython modules."""
         self._patch_two_arg_name(modules.get("idc"), "set_name")
+        self._patch_two_arg_name(modules.get("ida_name"), "set_name")
         self._patch_comment(modules.get("idc"), "set_cmt")
+        self._patch_comment(modules.get("ida_bytes"), "set_cmt")
         self._patch_func_comment(modules.get("idc"), "set_func_cmt")
-        if patch_explicit_api_modules:
-            self._patch_two_arg_name(modules.get("ida_name"), "set_name")
-            self._patch_comment(modules.get("ida_bytes"), "set_cmt")
-            self._patch_func_comment(modules.get("ida_funcs"), "set_func_cmt")
-        for module_name in ("idc", "ida_bytes") if patch_explicit_api_modules else ("idc",):
+        self._patch_func_comment(modules.get("ida_funcs"), "set_func_cmt")
+        for module_name in ("idc", "ida_bytes"):
             module = modules.get(module_name)
             self._patch_patch_int(module, "patch_byte", 1)
             self._patch_patch_int(module, "patch_word", 2)
             self._patch_patch_int(module, "patch_dword", 4)
             self._patch_patch_int(module, "patch_qword", 8)
-        if patch_explicit_api_modules:
-            self._patch_patch_bytes(modules.get("ida_bytes"), "patch_bytes")
+        self._patch_patch_bytes(modules.get("ida_bytes"), "patch_bytes")
         self._patch_type(modules.get("idc"), "SetType")
         self._patch_type(modules.get("idc"), "set_type")
 
@@ -99,7 +112,7 @@ class ChangeRecorder:
         def factory(original):
             def wrapper(ea, new_name, flags=0, *args, **kwargs):
                 result = original(ea, new_name, flags, *args, **kwargs)
-                if self._success(result):
+                if self._success(result) and not self.recording_suppressed:
                     self.rename(ea, str(new_name), flags=int(flags), source="monkeypatch")
                 return result
             return wrapper
@@ -109,7 +122,7 @@ class ChangeRecorder:
         def factory(original):
             def wrapper(ea, text, repeatable=0, *args, **kwargs):
                 result = original(ea, text, repeatable, *args, **kwargs)
-                if self._success(result):
+                if self._success(result) and not self.recording_suppressed:
                     self.comment(ea, str(text), repeatable=bool(repeatable), source="monkeypatch")
                 return result
             return wrapper
@@ -119,7 +132,7 @@ class ChangeRecorder:
         def factory(original):
             def wrapper(ea, text, repeatable=0, *args, **kwargs):
                 result = original(ea, text, repeatable, *args, **kwargs)
-                if self._success(result):
+                if self._success(result) and not self.recording_suppressed:
                     self.function_comment(ea, str(text), repeatable=bool(repeatable), source="monkeypatch")
                 return result
             return wrapper
@@ -129,7 +142,7 @@ class ChangeRecorder:
         def factory(original):
             def wrapper(ea, value, *args, **kwargs):
                 result = original(ea, value, *args, **kwargs)
-                if self._success(result):
+                if self._success(result) and not self.recording_suppressed:
                     self.patch_bytes(ea, int(value).to_bytes(width, "little", signed=False), source="monkeypatch")
                 return result
             return wrapper
@@ -139,7 +152,7 @@ class ChangeRecorder:
         def factory(original):
             def wrapper(ea, data, *args, **kwargs):
                 result = original(ea, data, *args, **kwargs)
-                if self._success(result):
+                if self._success(result) and not self.recording_suppressed:
                     self.patch_bytes(ea, data, source="monkeypatch")
                 return result
             return wrapper
@@ -149,7 +162,7 @@ class ChangeRecorder:
         def factory(original):
             def wrapper(ea, decl, flags=0, *args, **kwargs):
                 result = original(ea, decl, *args, **kwargs)
-                if self._success(result):
+                if self._success(result) and not self.recording_suppressed:
                     self.set_type(ea, str(decl), flags=int(flags or 0), source="monkeypatch")
                 return result
             return wrapper
@@ -165,7 +178,8 @@ class McpChangesApi:
 
     def rename(self, ea: int, name: str, flags: int = 0):
         module = self.modules.get("ida_name") or self.modules.get("idc")
-        ok = True if module is None or not hasattr(module, "set_name") else module.set_name(ea, name, flags)
+        with self.recorder.suppress_recording():
+            ok = True if module is None or not hasattr(module, "set_name") else module.set_name(ea, name, flags)
         if not ok:
             return ok
         self.recorder.rename(ea, name, flags=flags)
@@ -173,7 +187,8 @@ class McpChangesApi:
 
     def comment(self, ea: int, text: str, repeatable: bool = False):
         module = self.modules.get("ida_bytes") or self.modules.get("idc")
-        ok = True if module is None or not hasattr(module, "set_cmt") else module.set_cmt(ea, text, int(repeatable))
+        with self.recorder.suppress_recording():
+            ok = True if module is None or not hasattr(module, "set_cmt") else module.set_cmt(ea, text, int(repeatable))
         if not ok:
             return ok
         self.recorder.comment(ea, text, repeatable=repeatable)
@@ -181,7 +196,8 @@ class McpChangesApi:
 
     def function_comment(self, ea: int, text: str, repeatable: bool = False):
         module = self.modules.get("ida_funcs") or self.modules.get("idc")
-        ok = True if module is None or not hasattr(module, "set_func_cmt") else module.set_func_cmt(ea, text, int(repeatable))
+        with self.recorder.suppress_recording():
+            ok = True if module is None or not hasattr(module, "set_func_cmt") else module.set_func_cmt(ea, text, int(repeatable))
         if not ok:
             return ok
         self.recorder.function_comment(ea, text, repeatable=repeatable)
@@ -189,7 +205,8 @@ class McpChangesApi:
 
     def patch_bytes(self, ea: int, data: bytes | bytearray | str):
         module = self.modules.get("ida_bytes")
-        ok = True if module is None or not hasattr(module, "patch_bytes") else module.patch_bytes(ea, data)
+        with self.recorder.suppress_recording():
+            ok = True if module is None or not hasattr(module, "patch_bytes") else module.patch_bytes(ea, data)
         if not ok:
             return ok
         self.recorder.patch_bytes(ea, data)
@@ -198,7 +215,8 @@ class McpChangesApi:
     def set_type(self, ea: int, decl: str, flags: int = 0):
         module = self.modules.get("idc")
         func = getattr(module, "set_type", None) or getattr(module, "SetType", None) if module is not None else None
-        ok = True if func is None else func(ea, decl)
+        with self.recorder.suppress_recording():
+            ok = True if func is None else func(ea, decl)
         if not ok:
             return ok
         self.recorder.set_type(ea, decl, flags=flags)

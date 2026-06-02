@@ -63,6 +63,17 @@ def test_fingerprint_matching_requires_strong_identity():
     )
 
 
+def test_database_hash_is_authoritative_for_replay_identity():
+    assert not fingerprint_matches(
+        DatabaseFingerprint(input_sha256="same-input", database_sha256="old-idb"),
+        DatabaseFingerprint(input_sha256="same-input", database_sha256="new-idb"),
+    )
+    assert not fingerprint_matches(
+        DatabaseFingerprint(input_sha256="same-input", database_sha256="old-idb"),
+        DatabaseFingerprint(input_sha256="same-input"),
+    )
+
+
 def test_execute_result_accepts_worker_status_and_rejects_old_plugin_timeout():
     ExecuteResult(status="worker_start_error")
     with pytest.raises(ValidationError):

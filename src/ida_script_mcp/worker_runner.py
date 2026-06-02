@@ -51,7 +51,7 @@ def _build_worker_globals(recorder: ChangeRecorder) -> dict[str, Any]:
         "ida_funcs": _lazy_import("ida_funcs"),
         "ida_typeinf": _lazy_import("ida_typeinf"),
     }
-    recorder.install(modules, patch_explicit_api_modules=False)
+    recorder.install(modules)
     namespace = {"__builtins__": __builtins__, **modules}
     namespace["mcp_changes"] = McpChangesApi(recorder, modules)
     return namespace
