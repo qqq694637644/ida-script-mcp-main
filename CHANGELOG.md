@@ -6,6 +6,8 @@
 - Added strict worker status values, job protocol, process-tree hard timeout handling, and structured change capture/replay models.
 - Added GUI `/apply_changes` plus MCP `apply_worker_changes`, defaulting to dry-run.
 - Tightened worker startup and recording: batch mode, auto-analysis wait, copied-database verification, deterministic `qexit`, strict monkeypatch installation, old-value capture, `apply_tinfo` recording, and default job-directory cleanup.
+- Added stdlib fallback protocol models so the installed IDA plugin and worker support files can import without `pydantic` in IDA's embedded Python.
+- Structured job setup failures now cover source/request/runner/metadata write failures and default cleanup clears stale artifact paths.
 - Added unit coverage for protocol validation, GUI execute rejection, change recording, and isolated process-manager outcomes.
 
 

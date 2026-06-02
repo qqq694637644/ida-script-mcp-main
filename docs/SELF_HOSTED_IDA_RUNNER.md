@@ -105,7 +105,7 @@ The `tests/integration_ida` directory is intentionally separate from normal unit
 - Do not run untrusted fork pull-request code on a runner that has IDA installed or licensed.
 - Use `workflow_dispatch`, trusted branches, protected environments, or manual approval before running real IDA jobs.
 - Do not commit IDA runtime files, license files, `.env` files, or private `.i64` / `.idb` fixtures.
-- Clean `IDA_SCRIPT_MCP_WORK_DIR` periodically; job directories contain user scripts, stdout/stderr, copied databases, and replay artifacts.
+- Keep `IDA_SCRIPT_MCP_KEEP_JOBS=0` for normal CI. If you set it to `1` for debugging, clean `IDA_SCRIPT_MCP_WORK_DIR` periodically; retained job directories contain user scripts, stdout/stderr, copied databases, and replay artifacts.
 
 ## Troubleshooting
 
@@ -223,7 +223,7 @@ jobs:
 - 不要让不可信 fork PR 代码运行在安装/授权了 IDA 的 runner 上。
 - 真实 IDA job 应通过 `workflow_dispatch`、可信分支、受保护 environment 或人工审批触发。
 - 不要提交 IDA runtime、license、`.env` 或私有 `.i64` / `.idb` fixture。
-- 定期清理 `IDA_SCRIPT_MCP_WORK_DIR`；job 目录会包含用户脚本、stdout/stderr、数据库副本和 replay artifacts。
+- 普通 CI 保持 `IDA_SCRIPT_MCP_KEEP_JOBS=0`。如果为了调试设为 `1`，请定期清理 `IDA_SCRIPT_MCP_WORK_DIR`；保留的 job 目录会包含用户脚本、stdout/stderr、数据库副本和 replay artifacts。
 
 ## 排障
 

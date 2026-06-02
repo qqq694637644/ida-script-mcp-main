@@ -207,20 +207,24 @@ class IsolatedExecutionManager:
             result = self._failure("worker_start_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
             return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
 
-        execute_request = self._materialize_source(request, job_dir)
-        isolated_request = IsolatedExecuteRequest(
-            execute=execute_request,
-            job_id=job_id,
-            database_path=str(database_path),
-            database_copy_path=str(database_copy_path),
-            input_file_path=gui_context.get("input_file_path"),
-            context=gui_context,
-            collect_changes=collect_changes,
-            output_dir=str(job_dir),
-        )
-        _json_dump_atomic(job_dir / "request.json", isolated_request.model_dump(mode="json"))
-        self._write_runner(job_dir / "runner.py")
-        _json_dump_atomic(job_dir / "metadata.json", {"job_id": job_id, "gui_context": gui_context})
+        try:
+            execute_request = self._materialize_source(request, job_dir)
+            isolated_request = IsolatedExecuteRequest(
+                execute=execute_request,
+                job_id=job_id,
+                database_path=str(database_path),
+                database_copy_path=str(database_copy_path),
+                input_file_path=gui_context.get("input_file_path"),
+                context=gui_context,
+                collect_changes=collect_changes,
+                output_dir=str(job_dir),
+            )
+            _json_dump_atomic(job_dir / "request.json", isolated_request.model_dump(mode="json"))
+            self._write_runner(job_dir / "runner.py")
+            _json_dump_atomic(job_dir / "metadata.json", {"job_id": job_id, "gui_context": gui_context})
+        except Exception as exc:
+            result = self._failure("worker_start_error", request, started, type(exc).__name__, str(exc), instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
+            return self._finalize_job_result(result, request, started, job_dir=job_dir, keep_jobs=keep_jobs, instance_id=instance_id, port=port, job_id=job_id, artifacts=artifacts)
 
         stdout_path = job_dir / "stdout.txt"
         stderr_path = job_dir / "stderr.txt"
@@ -304,11 +308,11 @@ class IsolatedExecutionManager:
 
     def _finalize_job_result(self, result: ExecuteResult, request: ExecuteRequest, started: float, *, job_dir: Path, keep_jobs: bool, instance_id: Optional[str], port: Optional[int], job_id: str, artifacts: dict[str, str]) -> ExecuteResult:
         if keep_jobs:
-            return result
+            return result.model_copy(update={"artifacts_retained": True})
         try:
             shutil.rmtree(job_dir)
         except FileNotFoundError:
-            return result
+            return result.model_copy(update={"artifacts": {}, "artifacts_retained": False})
         except Exception as exc:
             cleanup_artifacts = dict(artifacts)
             cleanup_artifacts["cleanup_error"] = str(exc)
@@ -323,7 +327,7 @@ class IsolatedExecutionManager:
                 job_id=job_id,
                 artifacts=cleanup_artifacts,
             )
-        return result
+        return result.model_copy(update={"artifacts": {}, "artifacts_retained": False})
 
     def _failure(self, status: str, request: ExecuteRequest, started: float, error_type: str, message: str, *, instance_id: Optional[str] = None, port: Optional[int] = None, job_id: Optional[str] = None, worker_pid: Optional[int] = None, worker_exit_code: Optional[int] = None, stdout: str = "", stderr: str = "", artifacts: Optional[dict[str, str]] = None) -> ExecuteResult:
         return ExecuteResult(status=status, result=None, stdout=stdout, stderr=stderr, error=ExecutionError(type=error_type, message=message, traceback=None), duration_seconds=max(0.0, time.monotonic() - started), timeout_seconds=request.timeout_seconds, instance_id=instance_id, port=port, isolated=True, job_id=job_id, worker_pid=worker_pid, worker_exit_code=worker_exit_code, artifacts=artifacts or {})

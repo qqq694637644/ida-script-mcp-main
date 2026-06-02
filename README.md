@@ -119,6 +119,10 @@ ida-script-mcp-install install --project codex
 ida-script-mcp-install --list-clients
 ```
 
+The installed IDA plugin/support-file path does not require `pydantic` inside
+IDA's embedded Python. The MCP server still uses the normal Python package
+dependencies in the environment where `ida-script-mcp` runs.
+
 #### From source
 
 ```bash
@@ -332,6 +336,9 @@ ida-script-mcp-install install --project codex
 # 查看支持的客户端
 ida-script-mcp-install --list-clients
 ```
+
+安装到 IDA 的 plugin/support-file 路径不要求 IDA embedded Python 内安装
+`pydantic`。MCP server 仍使用运行 `ida-script-mcp` 的普通 Python 环境中的包依赖。
 
 #### 从源码安装
 

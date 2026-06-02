@@ -124,7 +124,8 @@ def test_missing_ida_path_returns_worker_start_error(tmp_path):
     assert "IDA_SCRIPT_MCP_IDA_PATH" in result.error.message
 
 
-def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path):
+def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path, monkeypatch):
+    monkeypatch.setenv("IDA_SCRIPT_MCP_KEEP_JOBS", "1")
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
     ida = tmp_path / "idat64"
@@ -179,6 +180,7 @@ def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path):
     assert result.worker_exit_code == 0
     assert result.changes[0].op == "rename"
     assert result.artifacts["request"].endswith("request.json")
+    assert result.artifacts_retained is True
 
 
 def test_missing_result_classified_by_exit_code(tmp_path):
@@ -252,6 +254,8 @@ def test_job_directory_is_deleted_by_default(tmp_path, monkeypatch):
     )
 
     assert result.status == "ok"
+    assert result.artifacts == {}
+    assert result.artifacts_retained is False
     assert not captured["job_dir"].exists()
 
 
@@ -281,6 +285,8 @@ def test_keep_jobs_env_preserves_job_directory(tmp_path, monkeypatch):
     )
 
     assert result.status == "ok"
+    assert result.artifacts["request"].endswith("request.json")
+    assert result.artifacts_retained is True
     assert captured["job_dir"].exists()
 
 
@@ -310,3 +316,38 @@ def test_invalid_keep_jobs_env_is_worker_start_error_without_launch(tmp_path, mo
     assert result.error.type == "ValueError"
     assert "IDA_SCRIPT_MCP_KEEP_JOBS" in result.error.message
     assert launched is False
+
+
+def test_materialize_source_failure_is_structured_and_cleans_job_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("IDA_SCRIPT_MCP_KEEP_JOBS", raising=False)
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    ida = tmp_path / "idat64"
+    ida.write_text("fake", encoding="utf-8")
+    launched = False
+
+    def popen(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+
+    def fail_materialize(_request, _job_dir):
+        raise PermissionError("cannot write user code")
+
+    manager._materialize_source = fail_materialize  # type: ignore[method-assign]
+
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db),
+        instance_id="sample",
+        port=1,
+    )
+
+    assert result.status == "worker_start_error"
+    assert result.error.type == "PermissionError"
+    assert result.artifacts == {}
+    assert result.artifacts_retained is False
+    assert launched is False
+    assert list((tmp_path / "jobs").iterdir()) == []
