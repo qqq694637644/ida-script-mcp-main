@@ -224,3 +224,89 @@ def test_timeout_kills_process_tree(tmp_path):
     assert result.status == "timeout"
     assert result.killed is True
     assert result.hard_timeout is True
+
+
+def test_job_directory_is_deleted_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("IDA_SCRIPT_MCP_KEEP_JOBS", raising=False)
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    ida = tmp_path / "idat64"
+    ida.write_text("fake", encoding="utf-8")
+    captured = {}
+
+    def popen(_args, **kwargs):
+        job_dir = Path(kwargs["cwd"])
+        captured["job_dir"] = job_dir
+        (job_dir / "result.json").write_text(
+            ExecuteResult(status="ok", result=1).model_dump_json(), encoding="utf-8"
+        )
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db),
+        instance_id="sample",
+        port=1,
+    )
+
+    assert result.status == "ok"
+    assert not captured["job_dir"].exists()
+
+
+def test_keep_jobs_env_preserves_job_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("IDA_SCRIPT_MCP_KEEP_JOBS", "1")
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    ida = tmp_path / "idat64"
+    ida.write_text("fake", encoding="utf-8")
+    captured = {}
+
+    def popen(_args, **kwargs):
+        job_dir = Path(kwargs["cwd"])
+        captured["job_dir"] = job_dir
+        (job_dir / "result.json").write_text(
+            ExecuteResult(status="ok", result=1).model_dump_json(), encoding="utf-8"
+        )
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db),
+        instance_id="sample",
+        port=1,
+    )
+
+    assert result.status == "ok"
+    assert captured["job_dir"].exists()
+
+
+def test_invalid_keep_jobs_env_is_worker_start_error_without_launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("IDA_SCRIPT_MCP_KEEP_JOBS", "true")
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    ida = tmp_path / "idat64"
+    ida.write_text("fake", encoding="utf-8")
+    launched = False
+
+    def popen(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db),
+        instance_id="sample",
+        port=1,
+    )
+
+    assert result.status == "worker_start_error"
+    assert result.error.type == "ValueError"
+    assert "IDA_SCRIPT_MCP_KEEP_JOBS" in result.error.message
+    assert launched is False

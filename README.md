@@ -143,7 +143,8 @@ Example:
 [IDA-Script-MCP] Functions endpoint: POST http://127.0.0.1:13338/functions
 [IDA-Script-MCP] Decompile endpoint: POST http://127.0.0.1:13338/decompile
 [IDA-Script-MCP] Xrefs endpoint: POST http://127.0.0.1:13338/xrefs
-[IDA-Script-MCP] Execute endpoint: POST http://127.0.0.1:13338/execute
+[IDA-Script-MCP] Execute endpoint disabled by default; use isolated worker execution
+[IDA-Script-MCP] Apply changes endpoint: POST http://127.0.0.1:13338/apply_changes
 ```
 
 ### Tool overview
@@ -200,7 +201,10 @@ replay; public execution never falls back to GUI `/execute`.
 
 Set `IDA_SCRIPT_MCP_IDA_PATH` to `idat`, `idat64`, `ida`, or `ida64` before
 using isolated execution. The current GUI database must be saved and clean; dirty
-or unsaved state is rejected instead of auto-saved.
+or unsaved state is rejected instead of auto-saved. Isolated job directories are
+deleted by default; set `IDA_SCRIPT_MCP_KEEP_JOBS=1` to keep them for debugging.
+The keep-jobs flag is intentionally strict: values other than `0` or `1` fail
+worker setup instead of silently changing behavior.
 
 Script execution returns an explicit `status` such as `ok`, `timeout`,
 `script_error`, `source_error`, `worker_start_error`, `worker_crashed`,
@@ -397,7 +401,9 @@ GUI `/execute`。
 
 使用隔离执行前，请设置 `IDA_SCRIPT_MCP_IDA_PATH` 指向 `idat`、`idat64`、
 `ida` 或 `ida64`。当前 GUI 数据库必须已经保存且处于 clean 状态；dirty、
-unsaved 或无法确认状态时都会被拒绝，不会自动保存或降级执行。
+unsaved 或无法确认状态时都会被拒绝，不会自动保存或降级执行。isolated job
+目录默认删除；如需调试可设置 `IDA_SCRIPT_MCP_KEEP_JOBS=1` 保留。该开关只接受
+`0` 或 `1`，其他值会让 worker setup 直接失败，不会静默改变行为。
 
 脚本执行会返回明确的 `status`，例如 `ok`、`timeout`、`script_error`、
 `source_error`、`worker_start_error`、`worker_crashed`、

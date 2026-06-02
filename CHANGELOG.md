@@ -5,6 +5,7 @@
 - Disabled GUI `/execute` by default behind `IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE=1`.
 - Added strict worker status values, job protocol, process-tree hard timeout handling, and structured change capture/replay models.
 - Added GUI `/apply_changes` plus MCP `apply_worker_changes`, defaulting to dry-run.
+- Tightened worker startup and recording: batch mode, auto-analysis wait, copied-database verification, deterministic `qexit`, strict monkeypatch installation, old-value capture, `apply_tinfo` recording, and default job-directory cleanup.
 - Added unit coverage for protocol validation, GUI execute rejection, change recording, and isolated process-manager outcomes.
 
 

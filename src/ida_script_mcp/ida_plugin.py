@@ -948,9 +948,9 @@ def _required_gui_type_api():
     if not HAS_IDA:
         raise RuntimeError("IDA runtime is unavailable for GUI change replay")
     module = __import__("idc")
-    setter = getattr(module, "set_type", None) or getattr(module, "SetType", None)
+    setter = getattr(module, "set_type", None)
     if setter is None:
-        raise RuntimeError("Required IDAPython API is unavailable: idc.set_type/SetType")
+        raise RuntimeError("Required IDAPython API is unavailable: idc.set_type")
     return setter
 
 
