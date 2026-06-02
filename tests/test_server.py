@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 # Add src to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -23,7 +25,9 @@ from ida_script_mcp.server import (
     DecompileFunctionInput,
     ExecuteScriptInput,
     GetXrefsInput,
+    IdaPluginResponseTimeout,
     ListFunctionsInput,
+    execute_idapython,
     find_instance_port,
     get_ida_host,
     get_ida_port,
@@ -45,18 +49,29 @@ class TestExecuteScriptInput:
         assert params.code is None
         assert params.script_path == "/path/to/script.py"
         assert params.capture_output is True
+        assert params.timeout_seconds == 30
 
-    def test_both_code_and_path_are_still_representable(self):
-        params = ExecuteScriptInput(
-            code="print('hello')",
-            script_path="/path/to/script.py",
-        )
-        assert params.code == "print('hello')"
-        assert params.script_path == "/path/to/script.py"
+    def test_requires_exactly_one_source(self):
+        with pytest.raises(ValidationError):
+            ExecuteScriptInput()
+
+        with pytest.raises(ValidationError):
+            ExecuteScriptInput(code="print('hello')", script_path="/path/to/script.py")
 
     def test_capture_output_false(self):
         params = ExecuteScriptInput(code="print('hello')", capture_output=False)
         assert params.capture_output is False
+
+    def test_capture_output_is_strict_bool(self):
+        with pytest.raises(ValidationError):
+            ExecuteScriptInput(code="print('hello')", capture_output="false")
+
+    def test_timeout_seconds(self):
+        params = ExecuteScriptInput(code="print('hello')", timeout_seconds=45)
+        assert params.timeout_seconds == 45
+
+        with pytest.raises(ValidationError):
+            ExecuteScriptInput(code="print('hello')", timeout_seconds=0)
 
     def test_whitespace_stripping(self):
         params = ExecuteScriptInput(code="  print('hello')  ")
@@ -69,6 +84,13 @@ class TestExecuteScriptInput:
     def test_port_parameter(self):
         params = ExecuteScriptInput(code="print('hello')", port=13339)
         assert params.port == 13339
+
+    def test_to_execute_request(self):
+        params = ExecuteScriptInput(code="print('hello')", timeout_seconds=45)
+        request = params.to_execute_request()
+        assert request.code == "print('hello')"
+        assert request.script_path is None
+        assert request.timeout_seconds == 45
 
 
 class TestReadToolInputs:
@@ -96,6 +118,35 @@ class TestReadToolInputs:
         assert params.name == "CreateFileW"
         assert params.direction == "to"
         assert params.xref_kind == "code"
+
+
+class TestExecuteIdapython:
+    """Tests for server-side execute_idapython transport semantics."""
+
+    def test_plugin_response_timeout_status(self, monkeypatch):
+        monkeypatch.setattr(
+            "ida_script_mcp.server.resolve_target",
+            lambda _params: (13338, "sample.exe", "sample.exe"),
+        )
+
+        def raise_timeout(*_args, **kwargs):
+            raise IdaPluginResponseTimeout("127.0.0.1", 13338, kwargs["timeout"])
+
+        monkeypatch.setattr("ida_script_mcp.server.make_ida_request", raise_timeout)
+
+        result = asyncio.run(
+            execute_idapython(ExecuteScriptInput(code="while True:\n    pass", timeout_seconds=1))
+        )
+
+        assert result["status"] == "plugin_response_timeout"
+        assert result["result"] is None
+        assert result["stdout"] == ""
+        assert result["stderr"] == ""
+        assert result["timeout_seconds"] == 1
+        assert result["instance_id"] == "sample.exe"
+        assert result["port"] == 13338
+        assert result["error"]["type"] == "PluginResponseTimeout"
+        assert "may still be running inside IDA" in result["error"]["message"]
 
 
 class TestConfiguration:

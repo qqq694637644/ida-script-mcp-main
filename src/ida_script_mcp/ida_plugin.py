@@ -8,8 +8,6 @@ LLMs do not need to synthesize IDAPython for every common workflow.
 
 from __future__ import annotations
 
-import ast
-import io
 import json
 import os
 import queue
@@ -17,7 +15,7 @@ import sys
 import threading
 import time
 import traceback
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -30,6 +28,25 @@ try:
     HAS_IDA = True
 except ImportError:
     HAS_IDA = False
+
+try:  # Package import used when this module is imported from ida_script_mcp.
+    from .execution import ScriptExecutor
+    from .protocol import ExecuteRequest, ExecuteResult, ExecutionError
+except ImportError:  # pragma: no cover - standalone IDA plugin support-file import.
+    plugin_dir = Path(__file__).parent
+    if str(plugin_dir) not in sys.path:
+        sys.path.insert(0, str(plugin_dir))
+
+    try:
+        from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
+        from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+            ExecuteRequest,
+            ExecuteResult,
+            ExecutionError,
+        )
+    except ImportError:
+        from execution import ScriptExecutor  # type: ignore[no-redef]
+        from protocol import ExecuteRequest, ExecuteResult, ExecutionError  # type: ignore[no-redef]
 
 PLUGIN_NAME = "IDA-Script-MCP"
 DEFAULT_HOST = "127.0.0.1"
@@ -164,122 +181,52 @@ def execute_on_main_thread(func, *args, write: bool = False, **kwargs):
     return result[1]
 
 
-def _make_jsonable(value: Any, depth: int = 0) -> Any:
-    """Convert arbitrary Python values into JSON-serializable structures."""
-    if depth > 6:
-        return str(value)
-
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, bytes):
-        return value.hex()
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {
-            str(key): _make_jsonable(inner_value, depth + 1)
-            for key, inner_value in value.items()
+def _execute_result_payload(result: ExecuteResult) -> dict[str, Any]:
+    """Attach plugin identity and convert an execution result to JSON data."""
+    result = result.model_copy(
+        update={
+            "instance_id": instance_registry.instance_id,
+            "port": instance_registry.port,
         }
-    if isinstance(value, (list, tuple, set)):
-        return [_make_jsonable(item, depth + 1) for item in value]
+    )
+    return result.model_dump(mode="json")
 
-    try:
-        return _make_jsonable(vars(value), depth + 1)
-    except Exception:
-        return str(value)
+
+def _source_error_payload(exc: BaseException) -> dict[str, Any]:
+    result = ExecuteResult(
+        status="source_error",
+        result=None,
+        stdout="",
+        stderr="",
+        error=ExecutionError(
+            type=type(exc).__name__,
+            message=str(exc),
+            traceback=traceback.format_exc(),
+        ),
+    )
+    return _execute_result_payload(result)
 
 
 def execute_python_script(
     code: Optional[str] = None,
     script_path: Optional[str] = None,
     capture_output: bool = True,
+    timeout_seconds: int = 30,
 ) -> dict[str, Any]:
     """Execute Python code or a script file in the IDA context."""
-    if code is None and script_path is None:
-        return {
-            "result": None,
-            "stdout": "",
-            "stderr": "Error: Either 'code' or 'script_path' must be provided",
-        }
-
-    if script_path is not None:
-        try:
-            with open(script_path, "r", encoding="utf-8") as handle:
-                code = handle.read()
-        except Exception as exc:
-            return {
-                "result": None,
-                "stdout": "",
-                "stderr": f"Error reading script file: {exc}",
-            }
-
-    stdout_capture = io.StringIO() if capture_output else None
-    stderr_capture = io.StringIO() if capture_output else None
-    old_stdout = sys.stdout if capture_output else None
-    old_stderr = sys.stderr if capture_output else None
-
     try:
-        if capture_output:
-            sys.stdout = stdout_capture
-            sys.stderr = stderr_capture
+        request = ExecuteRequest.model_validate(
+            {
+                "code": code,
+                "script_path": script_path,
+                "capture_output": capture_output,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+    except Exception as exc:
+        return _source_error_payload(exc)
 
-        exec_globals = _build_ida_globals()
-        exec_locals: dict[str, Any] = {}
-        result_value: Any = None
-
-        try:
-            tree = ast.parse(code or "")
-        except SyntaxError:
-            exec(code or "", exec_globals, exec_locals)
-            exec_globals.update(exec_locals)
-            if "result" in exec_locals:
-                result_value = exec_locals["result"]
-            elif exec_locals:
-                last_key = list(exec_locals.keys())[-1]
-                result_value = exec_locals[last_key]
-        else:
-            if not tree.body:
-                result_value = None
-            elif len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):
-                result_value = eval(code or "", exec_globals)
-            elif isinstance(tree.body[-1], ast.Expr):
-                if len(tree.body) > 1:
-                    exec_tree = ast.Module(body=tree.body[:-1], type_ignores=[])
-                    exec(compile(exec_tree, "<string>", "exec"), exec_globals, exec_locals)
-                    exec_globals.update(exec_locals)
-                eval_tree = ast.Expression(body=tree.body[-1].value)
-                result_value = eval(compile(eval_tree, "<string>", "eval"), exec_globals)
-            else:
-                exec(code or "", exec_globals, exec_locals)
-                exec_globals.update(exec_locals)
-                if "result" in exec_locals:
-                    result_value = exec_locals["result"]
-                elif exec_locals:
-                    last_key = list(exec_locals.keys())[-1]
-                    result_value = exec_locals[last_key]
-
-        stdout_text = stdout_capture.getvalue() if stdout_capture else ""
-        stderr_text = stderr_capture.getvalue() if stderr_capture else ""
-
-        return {
-            "instance_id": instance_registry.instance_id,
-            "port": instance_registry.port,
-            "result": _make_jsonable(result_value),
-            "stdout": stdout_text,
-            "stderr": stderr_text,
-        }
-    except Exception:
-        return {
-            "instance_id": instance_registry.instance_id,
-            "port": instance_registry.port,
-            "result": None,
-            "stdout": stdout_capture.getvalue() if stdout_capture else "",
-            "stderr": traceback.format_exc(),
-        }
-    finally:
-        if capture_output:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+    return _execute_result_payload(_execute_request(request))
 
 
 def _build_ida_globals() -> dict[str, Any]:
@@ -348,6 +295,74 @@ def _build_ida_globals() -> dict[str, Any]:
         "ida_xref": lazy_import("ida_xref"),
         "ida_enum": lazy_import("ida_enum"),
     }
+
+
+def _execute_request(request: ExecuteRequest) -> ExecuteResult:
+    """Execute a validated request in the current Python thread."""
+    return ScriptExecutor(_build_ida_globals).execute(request)
+
+
+def _execute_request_on_ida_main_thread(request: ExecuteRequest) -> ExecuteResult:
+    """Execute a validated request on IDA's main thread when IDA is available."""
+    if HAS_IDA:
+        return execute_on_main_thread(_execute_request, request, write=True)
+    return _execute_request(request)
+
+
+class ExecutionBusyError(RuntimeError):
+    """Raised when another script is already running."""
+
+
+class ExecutionRecord:
+    """Observable state for the currently running script."""
+
+    def __init__(self, request: ExecuteRequest):
+        self.started_monotonic = time.monotonic()
+        self.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.timeout_seconds = request.timeout_seconds
+        self.source = "script_path" if request.script_path is not None else "code"
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return max(0.0, time.monotonic() - self.started_monotonic)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "state": "running",
+            "started_at": self.started_at,
+            "source": self.source,
+            "elapsed_seconds": self.elapsed_seconds,
+            "timeout_seconds": self.timeout_seconds,
+            "deadline_exceeded": self.elapsed_seconds >= self.timeout_seconds,
+        }
+
+
+class ExecutionManager:
+    """Serialize IDA script execution and expose current execution state."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.current: Optional[ExecutionRecord] = None
+
+    def run(self, request: ExecuteRequest) -> ExecuteResult:
+        if not self._lock.acquire(blocking=False):
+            raise ExecutionBusyError("Another script is already running")
+
+        self.current = ExecutionRecord(request)
+        try:
+            return _execute_request_on_ida_main_thread(request)
+        finally:
+            self.current = None
+            self._lock.release()
+
+    def status(self) -> dict[str, Any]:
+        current = self.current
+        if current is None:
+            return {"state": "idle"}
+        return current.as_dict()
+
+
+execution_manager = ExecutionManager()
 
 
 def _badaddr() -> int:
@@ -864,6 +879,7 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                     "plugin": PLUGIN_NAME,
                     "instance_id": instance_registry.instance_id,
                     "port": instance_registry.port,
+                    "execution": execution_manager.status(),
                 },
             )
             return
@@ -889,21 +905,31 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/execute":
-                if HAS_IDA:
-                    result = execute_on_main_thread(
-                        execute_python_script,
-                        code=request_data.get("code"),
-                        script_path=request_data.get("script_path"),
-                        capture_output=request_data.get("capture_output", True),
-                        write=True,
+                try:
+                    execute_request = ExecuteRequest.model_validate(request_data)
+                except Exception as exc:
+                    self._send_json_response(400, _source_error_payload(exc))
+                    return
+
+                try:
+                    result = execution_manager.run(execute_request)
+                except ExecutionBusyError as exc:
+                    busy_result = ExecuteResult(
+                        status="busy",
+                        result=None,
+                        stdout="",
+                        stderr="",
+                        error=ExecutionError(
+                            type=type(exc).__name__,
+                            message=str(exc),
+                            traceback=None,
+                        ),
+                        timeout_seconds=execute_request.timeout_seconds,
                     )
-                else:
-                    result = execute_python_script(
-                        code=request_data.get("code"),
-                        script_path=request_data.get("script_path"),
-                        capture_output=request_data.get("capture_output", True),
-                    )
-                self._send_json_response(200, result)
+                    self._send_json_response(409, _execute_result_payload(busy_result))
+                    return
+
+                self._send_json_response(200, _execute_result_payload(result))
                 return
 
             if parsed.path == "/functions":
@@ -958,10 +984,11 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
             )
 
 
-class IdaScriptHttpServer(HTTPServer):
+class IdaScriptHttpServer(ThreadingHTTPServer):
     """HTTP server for IDA Script MCP."""
 
     allow_reuse_address = False
+    daemon_threads = True
 
     def __init__(self, host: str, port: int):
         super().__init__((host, port), IdaScriptHttpHandler)

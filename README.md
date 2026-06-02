@@ -149,6 +149,11 @@ module references.
 IDA database. Only use it with trusted assistants and keep the plugin bound to
 localhost.
 
+Script execution returns an explicit `status` such as `ok`, `timeout`,
+`script_error`, or `source_error`. A `plugin_response_timeout` means the MCP
+server stopped waiting for the IDA plugin response; the script may still be
+running inside IDA, especially if it is blocked inside native IDA/C code.
+
 ### License
 
 MIT License
@@ -281,6 +286,10 @@ ida_script_mcp/resources/idapython/
 
 `execute_idapython` 可以在 IDA 内执行任意 Python 代码，也可以修改 IDB。
 只应与可信的 AI 助手一起使用，并保持插件仅监听 localhost。
+
+脚本执行会返回明确的 `status`，例如 `ok`、`timeout`、`script_error` 或
+`source_error`。`plugin_response_timeout` 表示 MCP server 已停止等待 IDA
+插件响应；脚本可能仍在 IDA 内运行，尤其是阻塞在 native IDA/C 代码时。
 
 ### 许可证
 
