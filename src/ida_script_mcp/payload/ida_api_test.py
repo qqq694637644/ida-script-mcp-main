@@ -480,6 +480,31 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         )
         result["responses"]["functions_limit_one"] = functions_limit_one["body"]
         _check(result, "functions limit=1 returns at most one", functions_limit_one["body"].get("returned", 0) <= 1, functions_limit_one["body"])
+
+        total_functions = int(functions_page["body"].get("total", 0) or 0)
+        _stage("functions_offset_beyond_total_start", {"total": total_functions})
+        functions_offset_beyond = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {
+                "offset": total_functions + 1000,
+                "limit": 5,
+                "include_thunks": True,
+                "include_library_functions": True,
+            },
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["functions_offset_beyond_total"] = functions_offset_beyond["body"]
+        _check(
+            result,
+            "functions offset beyond total returns empty page",
+            functions_offset_beyond["body"].get("returned", -1) == 0
+            and functions_offset_beyond["body"].get("functions") == [],
+            functions_offset_beyond["body"],
+        )
+        _stage("functions_offset_beyond_total_done")
         _stage("functions_done")
 
         first_function = functions[0]
@@ -567,6 +592,19 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         result["responses"]["xrefs_invalid_direction"] = xrefs_invalid["body"]
         _check(result, "xrefs invalid direction is structured", bool(xrefs_invalid["body"].get("error")), xrefs_invalid["body"])
         _stage("xrefs_invalid_direction_done")
+
+        _stage("xrefs_invalid_kind_start")
+        xrefs_invalid_kind = _json_request(
+            "POST",
+            base_url,
+            "/xrefs",
+            {"address": start_ea_hex, "direction": "from", "xref_kind": "nonsense", "limit": 20},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["xrefs_invalid_kind"] = xrefs_invalid_kind["body"]
+        _check(result, "xrefs invalid kind is structured", bool(xrefs_invalid_kind["body"].get("error")), xrefs_invalid_kind["body"])
+        _stage("xrefs_invalid_kind_done")
 
         _stage("execute_disabled_start")
         execute_disabled = _json_request(

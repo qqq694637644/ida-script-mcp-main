@@ -255,6 +255,31 @@ IDA log note: no legacy top-level support-file PLUGIN_ENTRY or relative-import e
 Next action: run ida_plugin_api_test with ida_api_test_mode=full to cover /decompile, /xrefs, rejected /execute, and 404 behavior.
 ```
 
+### Run 26908795266 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26908795266
+Commit: a2ed1d3b04d994422e9bb4d36ab027f027aa7606
+Inputs: task_action=ida_plugin_api_test, ida_api_test_mode=full, ida_timeout_seconds=180, run_timeout_seconds=300
+Conclusion: success
+Artifact ID: 7395014591
+Result summary: external full harness succeeded in 5.672 seconds.
+Verified endpoints: /health, /metadata, /functions, /decompile, /xrefs, rejected /execute, unknown route 404.
+Verified decompile: selected function sub_180001000 returned found=true, disassembly list, and Hex-Rays pseudocode.
+Verified xrefs: direction=to returned a structured empty list, direction=from returned two xrefs, invalid direction returned structured error.
+Verified safety: GUI /execute returned HTTP 410 with status=rejected.
+IDA log note: support-file PLUGIN_ENTRY and relative-import errors remain absent. Patching plugin action registration warnings remain unrelated.
+Next action: add non-destructive corner cases for /functions offset beyond total and /xrefs invalid xref_kind, then rerun full.
+```
+
+Local implementation update after run 26908795266:
+
+```text
+Added /functions offset beyond total check.
+Added /xrefs invalid xref_kind check.
+Both are non-destructive and should be included in the next full rerun.
+```
+
 ## Update protocol
 
 After every real workflow run, append:

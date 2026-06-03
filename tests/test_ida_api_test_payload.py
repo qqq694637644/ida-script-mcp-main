@@ -28,6 +28,8 @@ def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None
     assert "ida_ready.json" in script
     assert "ida_ready_wait_start" in script
     assert "_run_external_api_tests" in script
+    assert "functions_offset_beyond_total_start" in script
+    assert "xrefs_invalid_kind_start" in script
     assert "threading.Thread" not in script
     assert "_run_http_tests" not in script
     assert "__DLL_PATH_JSON__" not in script
