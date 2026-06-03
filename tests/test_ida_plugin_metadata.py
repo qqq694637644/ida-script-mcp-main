@@ -170,6 +170,18 @@ def test_collect_database_info_uses_change_count_dirty_fallback(monkeypatch, tmp
     assert dirty_info["database_change_count"] == 11
 
 
+def test_database_dirty_state_uses_apply_changes_mutation_flag(monkeypatch):
+    fake_idaapi = types.SimpleNamespace(is_database_modified=lambda: False)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(ida_plugin, "idaapi", fake_idaapi, raising=False)
+    monkeypatch.setattr(ida_plugin, "DATABASE_MUTATED_BY_APPLY_CHANGES", True)
+
+    dirty, error = ida_plugin._database_dirty_state()
+
+    assert dirty is True
+    assert error is None
+
+
 def _apply_payload(
     database_sha256: str = "abc",
     *,
@@ -258,6 +270,7 @@ def test_apply_changes_rejects_missing_database_identity(monkeypatch):
 
 
 def _clean_matching_metadata(monkeypatch):
+    monkeypatch.setattr(ida_plugin, "DATABASE_MUTATED_BY_APPLY_CHANGES", False)
     monkeypatch.setattr(
         ida_plugin,
         "_collect_database_info",
@@ -375,6 +388,7 @@ def test_apply_changes_applies_all_supported_operations(monkeypatch):
     assert result["errors"] == []
     assert ("function_comment", 0x1000, "function comment", 0) in calls
     assert ("patch_bytes", 0x1000, b"\x90") in calls
+    assert ida_plugin.DATABASE_MUTATED_BY_APPLY_CHANGES is True
 
 
 def test_apply_changes_dry_run_does_not_call_write_apis(monkeypatch):

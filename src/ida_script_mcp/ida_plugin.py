@@ -103,6 +103,7 @@ INSTANCE_INFO_FILE = Path.home() / ".ida_script_mcp_instances.json"
 INSTANCE_LOCK = threading.Lock()
 DATABASE_CHANGE_COUNT_BASELINE: int | None = None
 DATABASE_CHANGE_COUNT_BASELINE_ERROR: str | None = None
+DATABASE_MUTATED_BY_APPLY_CHANGES = False
 
 
 def get_instance_id() -> str:
@@ -630,6 +631,8 @@ def _input_hash(name: str) -> str | None:
 def _database_dirty_state() -> tuple[bool | None, str | None]:
     if not HAS_IDA:
         return None, "IDA APIs unavailable"
+    if DATABASE_MUTATED_BY_APPLY_CHANGES:
+        return True, None
     checker = getattr(idaapi, "is_database_modified", None)
     if checker is not None:
         try:
@@ -702,8 +705,11 @@ def _collect_database_info() -> dict[str, Any]:
         "dirty": dirty_state,
         "unsaved": dirty_state,
         "dirty_state_known": dirty_state is not None,
+        "apply_changes_mutated": DATABASE_MUTATED_BY_APPLY_CHANGES,
         "dirty_state_method": (
-            "idaapi.is_database_modified"
+            "apply_changes_mutation_flag"
+            if DATABASE_MUTATED_BY_APPLY_CHANGES
+            else "idaapi.is_database_modified"
             if HAS_IDA and getattr(idaapi, "is_database_modified", None) is not None
             else "database_change_count_baseline"
             if HAS_IDA
@@ -1355,6 +1361,8 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
 
 
 def apply_changes_request(payload: dict[str, Any]) -> dict[str, Any]:
+    global DATABASE_MUTATED_BY_APPLY_CHANGES
+
     request = ApplyChangesRequest.model_validate(payload)
     current_metadata = _collect_database_info()
     if current_metadata.get("dirty_state_known") is False or current_metadata.get("dirty") is None:
@@ -1404,6 +1412,8 @@ def apply_changes_request(payload: dict[str, Any]) -> dict[str, Any]:
             if not request.dry_run:
                 break
     status = "ok" if not errors else ("partial" if applied or skipped else "error")
+    if not request.dry_run and applied:
+        DATABASE_MUTATED_BY_APPLY_CHANGES = True
     return ApplyChangesResult(
         status=status,
         job_id=request.job_id,
