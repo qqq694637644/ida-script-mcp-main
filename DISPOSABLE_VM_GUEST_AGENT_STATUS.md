@@ -121,6 +121,35 @@ runner=HostMachine
   - `Run disposable VM guest agent smoke`
   - `Upload disposable VM smoke logs`
 
+### Phase 2 verification
+
+- Phase 2 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
+- Verified run:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26902252502
+attempt 1
+conclusion=success
+runner=HostMachine
+artifact=disposable-vm-guest-agent-smoke
+```
+
+- 验证输入：
+
+```text
+task_action=command
+command_json=["python", "--version"]
+controller_url=http://192.168.1.249:8766
+```
+
+- Artifact 中确认：
+  - `payload.json` action 为 `command`
+  - payload command 为 `["python", "--version"]`
+  - `result.json` status 为 `completed`
+  - `result.json` exit_code 为 `0`
+  - `stdout_tail` 为 `Python 3.11.7\n`
+  - guest hello python_version 为 `3.11.7`
+
 ### Tests
 
 - 已新增 protocol / host controller / guest agent / guest dependency check 单元测试。
@@ -133,26 +162,6 @@ py -3 -m pytest -q
 py -3 -m ruff check src tests
 All checks passed
 ```
-
-## 待验证
-
-### Phase 2 实机验证
-
-- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
-- 输入：
-
-```text
-task_action=command
-command_json=["python", "--version"]
-controller_url=http://192.168.1.249:8766
-```
-
-- 验收：
-  - guest 执行 `python --version`
-  - guest result 包含 stdout/stderr tail
-  - guest result 包含 `exit_code=0`
-  - workflow conclusion 为 success
-  - artifact 中保存 `result.json` 和 `guest_logs.ndjson`
 
 ## 待实现
 

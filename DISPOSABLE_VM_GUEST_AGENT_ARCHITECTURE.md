@@ -313,7 +313,8 @@ Implementation status:
 ```text
 Implemented in host controller, guest agent, and disposable VM workflow.
 Workflow inputs: task_action=command, command_json=["python", "--version"]
-Verification status: pending Phase 2 workflow_dispatch run.
+Verified run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26902252502 attempt 1
+Verified result: stdout_tail="Python 3.11.7\n", exit_code=0
 ```
 
 ### Phase 3: upload and execute script
