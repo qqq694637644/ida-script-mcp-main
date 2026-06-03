@@ -20,6 +20,15 @@ on:
         required: true
         type: boolean
         default: true
+      run_vmware_restore:
+        description: "Run the HostMachine VMware restore script before waiting for guest"
+        required: false
+        type: boolean
+        default: true
+      restore_extra_args_json:
+        description: "Extra JSON array args passed to VMware restore script"
+        required: false
+        default: "[]"
       task_action:
         description: "Guest task action"
         required: true
@@ -95,6 +104,15 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($restoreScript)) {
             $restoreScript = "C:\Users\alion\Scripts\vmware_restore_test1.py"
           }
+          $runVmwareRestore = "${{ inputs.run_vmware_restore }}"
+          if ([string]::IsNullOrWhiteSpace($runVmwareRestore)) { $runVmwareRestore = "true" }
+          $restoreExtraArgsJson = '${{ inputs.restore_extra_args_json }}'
+          if ([string]::IsNullOrWhiteSpace($restoreExtraArgsJson)) { $restoreExtraArgsJson = "[]" }
+          try {
+            $restoreExtraArgs = @($restoreExtraArgsJson | ConvertFrom-Json)
+          } catch {
+            throw "restore_extra_args_json must be a JSON array of strings: $restoreExtraArgsJson"
+          }
           $taskAction = "${{ inputs.task_action }}"
           if ([string]::IsNullOrWhiteSpace($taskAction)) { $taskAction = "noop" }
           $controllerTaskAction = $taskAction
@@ -120,11 +138,20 @@ jobs:
             "--task-action", $controllerTaskAction,
             "--connect-timeout-seconds", $connectTimeout,
             "--timeout-seconds", $runTimeout,
-            "--result-dir", $resultDir,
-            "--vmware-restore-script", $restoreScript
+            "--result-dir", $resultDir
           )
-          if ($restoreGui -eq "true") {
-            $controllerArgs += "--vmware-restore-arg=--gui"
+          if ($runVmwareRestore -eq "true") {
+            $controllerArgs += @("--vmware-restore-script", $restoreScript)
+            if ($restoreGui -eq "true") {
+              $controllerArgs += "--vmware-restore-arg=--gui"
+            }
+            foreach ($restoreArg in $restoreExtraArgs) {
+              if (-not [string]::IsNullOrWhiteSpace([string]$restoreArg)) {
+                $controllerArgs += "--vmware-restore-arg=$restoreArg"
+              }
+            }
+          } else {
+            Write-Host "Skipping VMware restore; waiting for an already-running guest agent."
           }
           if ($taskAction -eq "command") {
             $controllerArgs += @("--command-json", $commandJson)

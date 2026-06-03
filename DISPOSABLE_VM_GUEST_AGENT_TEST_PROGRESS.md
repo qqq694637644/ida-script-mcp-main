@@ -109,7 +109,22 @@ These must be covered before claiming full completion:
 - `src/ida_script_mcp/payload/ida_api_test.py` added locally.
 - Workflow action `ida_plugin_api_test` added locally.
 - Local unit tests for generated payload compilation pass.
-- First real workflow_dispatch run has not yet been started.
+- First real workflow_dispatch run reached HostMachine but failed before guest connection due VMware snapshot restore mismatch.
+
+## Real workflow runs
+
+### Run 26906262507 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26906262507
+Commit: 37eee263d82e100ea9c55368a1a34c37bc4c491a
+Inputs: task_action=ida_plugin_api_test, ida_dir=C:\Users\alion\Desktop\IDAPro8.3, dll_path=C:\Users\alion\Desktop\test1.dll
+Conclusion: failure
+Artifact ID: 7393959742
+Result summary: host controller started, but VMware restore script returned 1 before guest connected.
+Failure: vmware_restore_test1.py --gui reported available snapshot `Snapshot 1` but target snapshot `test1` was not found.
+Next action: workflow now supports run_vmware_restore=false and restore_extra_args_json so IDA API payload can be tested against an already-running guest or with restore-script-specific extra args.
+```
 
 ## Update protocol
 
