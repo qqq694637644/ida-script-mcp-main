@@ -222,8 +222,8 @@ The host builds a standalone guest payload from the current repository. The
 guest installs the current plugin files, starts IDA with the DLL and an
 IDAPython bootstrap, waits for `ida_auto.auto_wait()`, starts the plugin HTTP
 server, and tests `/health`, `/metadata`, `/functions`, `/decompile`, `/xrefs`,
-GUI `/execute` rejection, and 404 behavior. Detailed run-by-run progress is
-tracked in `DISPOSABLE_VM_GUEST_AGENT_TEST_PROGRESS.md`.
+GUI `/execute` rejection, and 404 behavior. Workflow lessons are summarized in
+`DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
 
 ## Host result files
 

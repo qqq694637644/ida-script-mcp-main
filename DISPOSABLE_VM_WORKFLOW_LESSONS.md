@@ -4,7 +4,7 @@ Last updated: 2026-06-04
 
 This document summarizes the workflow failures, fixes, and successful patterns discovered while building the HostMachine -> disposable guest VM -> IDA automation path.
 
-Use this as the short operational memory after context compression. Detailed run-by-run logs remain in `DISPOSABLE_VM_GUEST_AGENT_TEST_PROGRESS.md`.
+Use this as the short operational memory after context compression.
 
 ## Current verified workflow path
 

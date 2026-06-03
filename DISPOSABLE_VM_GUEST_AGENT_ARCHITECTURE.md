@@ -435,7 +435,7 @@ Workflow inputs: ida_dir, dll_path, ida_timeout_seconds, ida_api_test_mode
 Verified basic run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26908653405 attempt 1
 Verified full run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26909020426 attempt 1
 Verified result: /health, /metadata, /functions, /decompile, /xrefs, rejected /execute, unknown route 404, functions offset beyond total, and xrefs invalid kind all passed against C:\Users\alion\Desktop\test1.dll.
-Detailed progress: DISPOSABLE_VM_GUEST_AGENT_TEST_PROGRESS.md
+Operational lessons: DISPOSABLE_VM_WORKFLOW_LESSONS.md
 ```
 
 ## 12. Current verified foundation
