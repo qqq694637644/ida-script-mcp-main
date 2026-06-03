@@ -157,6 +157,35 @@ controller_url=http://192.168.1.249:8766
   - `stdout_tail` 为 `Python 3.11.7\n`
   - guest hello python_version 为 `3.11.7`
 
+### Phase 3 verification
+
+- Phase 3 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
+- Verified run:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26903071347
+attempt 1
+conclusion=success
+runner=HostMachine
+artifact=disposable-vm-guest-agent-smoke
+```
+
+- 验证输入：
+
+```text
+task_action=python_script
+controller_url=http://192.168.1.249:8766
+```
+
+- Artifact 中确认：
+  - `payload.json` action 为 `python_script`
+  - `payload.json` script_text 包含内置 Phase 3 smoke script
+  - guest metadata command 使用 Python 3.11.7 执行 per-job `payload.py`
+  - `result.json` status 为 `completed`
+  - `result.json` exit_code 为 `0`
+  - `stdout_tail` 包含 `phase3 script ok python=3.11.7`
+  - guest hello python_version 为 `3.11.7`
+
 ### Tests
 
 - 已新增 protocol / host controller / guest agent / guest dependency check 单元测试。
@@ -189,24 +218,6 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - 配置 guest agent 开机自启。
 - 确认 guest agent 使用的 controller endpoint 和 HostMachine VMware network 地址一致。
 - 完成 clean snapshot 制作。
-
-### Phase 3 实机验证
-
-- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
-- 输入：
-
-```text
-task_action=python_script
-controller_url=http://192.168.1.249:8766
-```
-
-- 验收：
-  - payload action 为 `python_script`
-  - guest 写入并执行 `payload.py`
-  - guest result 包含 `stdout_tail` 中的 `phase3 script ok python=3.11.7`
-  - guest result 包含 `exit_code=0`
-  - workflow conclusion 为 success
-  - artifact 中保存 `payload.json`、`result.json` 和 `guest_logs.ndjson`
 
 ### Phase 4: project deploy/test payload
 

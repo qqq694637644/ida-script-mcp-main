@@ -336,7 +336,8 @@ Implementation status:
 Implemented in host controller, guest agent, and disposable VM workflow.
 Workflow input: task_action=python_script
 Workflow writes a built-in UTF-8 Phase 3 smoke script and passes it to host controller with --script-path.
-Verification status: pending Phase 3 workflow_dispatch run.
+Verified run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26903071347 attempt 1
+Verified result: stdout_tail contains "phase3 script ok python=3.11.7", exit_code=0
 ```
 
 ### Phase 4: project deploy/test payload
