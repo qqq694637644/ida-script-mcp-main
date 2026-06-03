@@ -330,6 +330,14 @@ guest uploads result/logs
 host workflow uses guest exit_code
 ```
 
+Implementation status:
+
+```text
+Implemented in host controller, guest agent, and disposable VM workflow.
+Workflow inputs: task_action=python_script, script_text=<UTF-8 Python script>
+Verification status: pending Phase 3 workflow_dispatch run.
+```
+
 ### Phase 4: project deploy/test payload
 
 Goal: host sends repository/test payload and guest runs real IDA integration deployment/test steps.

@@ -27,11 +27,16 @@ on:
         options:
           - noop
           - command
+          - python_script
         default: noop
       command_json:
         description: "JSON command array used when task_action=command"
         required: false
         default: '["python", "--version"]'
+      script_text:
+        description: "UTF-8 Python script used when task_action=python_script"
+        required: false
+        default: 'import platform, sys; print(f"phase3 script ok python={platform.python_version()} executable={sys.executable}")'
       connect_timeout_seconds:
         description: "Seconds to wait for guest /hello"
         required: true
@@ -84,6 +89,12 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($taskAction)) { $taskAction = "noop" }
           $commandJson = '${{ inputs.command_json }}'
           if ([string]::IsNullOrWhiteSpace($commandJson)) { $commandJson = '["python", "--version"]' }
+          $scriptText = @'
+${{ inputs.script_text }}
+'@
+          if ([string]::IsNullOrWhiteSpace($scriptText)) {
+            $scriptText = 'import platform, sys; print(f"phase3 script ok python={platform.python_version()} executable={sys.executable}")'
+          }
           $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
           if ([string]::IsNullOrWhiteSpace($connectTimeout)) { $connectTimeout = "600" }
           $runTimeout = "${{ inputs.run_timeout_seconds }}"
@@ -106,6 +117,11 @@ jobs:
           }
           if ($taskAction -eq "command") {
             $controllerArgs += @("--command-json", $commandJson)
+          }
+          if ($taskAction -eq "python_script") {
+            $scriptPath = Join-Path $resultDir "phase3_payload.py"
+            Set-Content -Path $scriptPath -Value $scriptText -Encoding UTF8
+            $controllerArgs += @("--script-path", $scriptPath)
           }
 
           py -3 -m ida_script_mcp.disposable_vm.host_controller @controllerArgs

@@ -102,6 +102,14 @@ ida-script-mcp-vm-guest-check-imports
   - host controller 将 command payload 下发给 guest
   - guest 执行 list-form command 并回传 stdout/stderr/exit_code
 
+- workflow 已支持 Phase 3 Python script payload：
+  - input `task_action=python_script`
+  - input `script_text`, default 为打印 guest Python 版本和 executable 的 UTF-8 Python script
+  - workflow 将 `script_text` 写入 HostMachine 临时 payload file
+  - host controller 使用 `--script-path` 读取 payload 并下发给 guest
+  - guest 将 payload 写入 per-job directory 的 `payload.py` 并用 guest 当前 Python 执行
+  - guest 回传 stdout/stderr/exit_code 和 metadata
+
 ### Phase 1 verification
 
 - Phase 1 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
@@ -183,12 +191,24 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - 确认 guest agent 使用的 controller endpoint 和 HostMachine VMware network 地址一致。
 - 完成 clean snapshot 制作。
 
-### Phase 3: Python script payload
+### Phase 3 实机验证
 
-- 下发 UTF-8 Python script payload。
-- guest 写入 per-job directory。
-- guest 用 Python 3.11.7 执行 payload。
-- host 收集 stdout/stderr/result metadata。
+- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
+- 输入：
+
+```text
+task_action=python_script
+script_text=import platform, sys; print(f"phase3 script ok python={platform.python_version()} executable={sys.executable}")
+controller_url=http://192.168.1.249:8766
+```
+
+- 验收：
+  - payload action 为 `python_script`
+  - guest 写入并执行 `payload.py`
+  - guest result 包含 `stdout_tail` 中的 `phase3 script ok python=3.11.7`
+  - guest result 包含 `exit_code=0`
+  - workflow conclusion 为 success
+  - artifact 中保存 `payload.json`、`result.json` 和 `guest_logs.ndjson`
 
 ### Phase 4: project deploy/test payload
 

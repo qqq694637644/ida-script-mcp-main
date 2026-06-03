@@ -36,6 +36,19 @@ def test_build_payload_uses_command_json() -> None:
     assert payload.command == ["py", "-3", "--version"]
 
 
+def test_build_payload_uses_python_script_file(tmp_path) -> None:
+    script_path = tmp_path / "payload.py"
+    script_path.write_text("print('phase3 ok')\n", encoding="utf-8")
+
+    payload = build_payload(
+        _args(task_action="python_script", script_path=str(script_path)),
+        "job-1",
+    )
+
+    assert payload.action is TaskAction.PYTHON_SCRIPT
+    assert payload.script_text == "print('phase3 ok')\n"
+
+
 def test_controller_state_persists_hello_and_result(tmp_path) -> None:
     payload = TaskPayload(job_id="job-1", action=TaskAction.NOOP, timeout_seconds=10)
     state = ControllerState(
