@@ -18,6 +18,10 @@ def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None
     assert "IDAPro8.3" in script
     assert "test1.dll" in script
     assert "IDA_PLUGIN_API_TEST_RESULT=" in script
+    assert "__DLL_PATH_JSON__" not in script
+    assert "DLL_PATH = __BOOTSTRAP_DLL_PATH_JSON__" not in script
+    assert "__IDA_DIR_JSON__" not in script
+    assert "__IDA_TIMEOUT_SECONDS_JSON__" not in script
     assert '"/metadata"' in script
     assert '"/functions"' in script
     assert '"/decompile"' in script

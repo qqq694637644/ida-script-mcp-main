@@ -139,6 +139,21 @@ Failure: controller_state.json status=guest_connect_timeout, hello=null, payload
 Next action: restore/start guest VM is required before the IDA API payload can execute. The VMware snapshot currently visible to the restore script is `Snapshot 1`, while the script targets `test1`; either restore/rename the VM snapshot to `test1`, or provide restore script arguments that select `Snapshot 1` if the script supports that.
 ```
 
+### Run 26906631054 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26906631054
+Commit: 6bbcb9ad32ba2df26ded6f3f0470c50b591f934b
+Inputs: task_action=ida_plugin_api_test, restore_extra_args_json=["--snapshot", "Snapshot 1"], ida_dir=C:\Users\alion\Desktop\IDAPro8.3, dll_path=C:\Users\alion\Desktop\test1.dll
+Conclusion: failure
+Artifact ID: 7394113496
+Result summary: VMware restore using `--snapshot Snapshot 1` succeeded, guest connected, payload downloaded and result uploaded.
+Failure: generated guest payload still contained unresolved placeholder `__BOOTSTRAP_DLL_PATH_JSON__` at top-level `DLL_PATH`, producing NameError before IDA launch.
+Next action: fixed `src/ida_script_mcp/payload/ida_api_test.py` so top-level DLL_PATH uses `__DLL_PATH_JSON__`; added tests that generated payload contains no unresolved DLL/IDA placeholders.
+```
+
+Snapshot note: user reports the VMware snapshot name has been changed back to `test1`; next run should use default restore args with no `restore_extra_args_json` override.
+
 ## Update protocol
 
 After every real workflow run, append:
