@@ -353,6 +353,39 @@ guest uploads logs/artifacts
 host workflow reflects the result
 ```
 
+### Phase 4a: IDA plugin install smoke
+
+Goal: host dynamically sends an install/verify payload to guest and validates
+that the IDA plugin can be installed for the guest IDA Pro runtime.
+
+Inputs:
+
+```text
+task_action=ida_plugin_install
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+```
+
+Acceptance:
+
+```text
+host embeds current ida_plugin.py and support files into a guest-side payload
+guest verifies the IDA directory and expected IDA executable
+guest installs plugin files into the per-user IDA plugins directory
+guest verifies installed file hashes and Python syntax
+guest imports standalone plugin/support modules outside IDA without import errors
+guest writes ida_script_mcp_install_manifest.json
+guest uploads result/logs with exit_code=0
+```
+
+Implementation status:
+
+```text
+Implemented in host payload builder and disposable VM workflow.
+Workflow input: task_action=ida_plugin_install
+Workflow input: ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+Verification status: pending workflow_dispatch run.
+```
+
 ## 12. Current verified foundation
 
 Already verified on the current branch:

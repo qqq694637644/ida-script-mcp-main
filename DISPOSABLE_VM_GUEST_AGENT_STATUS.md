@@ -109,6 +109,16 @@ ida-script-mcp-vm-guest-check-imports
   - guest 将 payload 写入 per-job directory 的 `payload.py` 并用 guest 当前 Python 执行
   - guest 回传 stdout/stderr/exit_code 和 metadata
 
+- workflow 已支持 IDA plugin install smoke：
+  - input `task_action=ida_plugin_install`
+  - input `ida_dir`, default `C:\Users\alion\Desktop\IDAPro8.3`
+  - HostMachine 动态读取当前仓库中的 `ida_plugin.py` 和 support files
+  - HostMachine 生成 standalone guest-side install/verify Python payload
+  - host controller 通过 `python_script` payload 将安装验证脚本下发给 guest
+  - guest 验证 IDA directory 和 IDA executable，安装插件文件到 per-user IDA plugins 目录
+  - guest 对安装文件做 SHA-256 校验、`py_compile` 校验和 standalone import 校验
+  - guest 写入 `ida_script_mcp_install_manifest.json` 并回传 stdout/stderr/exit_code
+
 ### Phase 1 verification
 
 - Phase 1 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
@@ -225,6 +235,25 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - guest 解包并部署测试环境。
 - guest 运行真实 IDA integration deployment/test steps。
 - host 收集 logs/artifacts 并按 guest exit code 决定 workflow success/failure。
+
+### IDA plugin install smoke 实机验证
+
+- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
+- 输入：
+
+```text
+task_action=ida_plugin_install
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+controller_url=http://192.168.1.249:8766
+```
+
+- 验收：
+  - guest 验证 `ida_dir` 存在且包含 IDA executable
+  - guest 安装 `ida_script_mcp.py` 和 support files
+  - guest 生成 `ida_script_mcp_install_manifest.json`
+  - guest result 包含 `IDA_PLUGIN_INSTALL_VERIFY_RESULT=`
+  - guest result 包含 `exit_code=0`
+  - workflow conclusion 为 success
 
 ### 后续增强
 

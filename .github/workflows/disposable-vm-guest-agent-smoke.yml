@@ -28,7 +28,12 @@ on:
           - noop
           - command
           - python_script
+          - ida_plugin_install
         default: noop
+      ida_dir:
+        description: "Guest IDA Pro directory used when task_action=ida_plugin_install"
+        required: false
+        default: "C:\\Users\\alion\\Desktop\\IDAPro8.3"
       command_json:
         description: "JSON command array used when task_action=command"
         required: false
@@ -83,6 +88,9 @@ jobs:
           }
           $taskAction = "${{ inputs.task_action }}"
           if ([string]::IsNullOrWhiteSpace($taskAction)) { $taskAction = "noop" }
+          $controllerTaskAction = $taskAction
+          $idaDir = "${{ inputs.ida_dir }}"
+          if ([string]::IsNullOrWhiteSpace($idaDir)) { $idaDir = "C:\Users\alion\Desktop\IDAPro8.3" }
           $commandJson = '${{ inputs.command_json }}'
           if ([string]::IsNullOrWhiteSpace($commandJson)) { $commandJson = '["python", "--version"]' }
           $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
@@ -96,7 +104,7 @@ jobs:
             "--bind-host", "0.0.0.0",
             "--port", $port,
             "--advertise-url", $controllerUrl,
-            "--task-action", $taskAction,
+            "--task-action", $controllerTaskAction,
             "--connect-timeout-seconds", $connectTimeout,
             "--timeout-seconds", $runTimeout,
             "--result-dir", $resultDir,
@@ -115,6 +123,13 @@ jobs:
               "import sys",
               "print('phase3 script ok python=' + platform.python_version() + ' executable=' + sys.executable)"
             ) | Set-Content -Path $scriptPath -Encoding UTF8
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_install") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_install_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_plugin_install --ida-dir $idaDir --output $scriptPath
             $controllerArgs += @("--script-path", $scriptPath)
           }
 

@@ -165,6 +165,20 @@ task_action=python_script
 For the Phase 3 smoke path, the workflow writes a built-in UTF-8 script payload
 on HostMachine and passes that file to the host controller with `--script-path`.
 
+`ida_plugin_install` is the first IDA-specific dynamic payload smoke. The host
+builds a standalone guest-side installer from the current repository files and
+sends it through the existing `python_script` payload channel.
+
+```text
+task_action=ida_plugin_install
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+```
+
+The guest verifies the IDA directory, installs `ida_script_mcp.py` plus support
+files into the per-user IDA plugins directory, compiles and hash-checks the
+installed files, performs standalone import validation, and writes
+`ida_script_mcp_install_manifest.json`.
+
 ## Host result files
 
 The host controller writes these files under `--result-dir`:
