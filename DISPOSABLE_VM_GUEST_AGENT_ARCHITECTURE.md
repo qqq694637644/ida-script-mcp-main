@@ -383,7 +383,8 @@ Implementation status:
 Implemented in host payload builder and disposable VM workflow.
 Workflow input: task_action=ida_plugin_install
 Workflow input: ida_dir=C:\Users\alion\Desktop\IDAPro8.3
-Verification status: pending workflow_dispatch run.
+Verified run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26903926544 attempt 1
+Verified result: status=installed, exit_code=0, plugin files installed under per-user IDA plugins directory.
 ```
 
 ## 12. Current verified foundation

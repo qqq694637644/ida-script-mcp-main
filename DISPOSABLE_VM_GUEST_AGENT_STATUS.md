@@ -196,6 +196,38 @@ controller_url=http://192.168.1.249:8766
   - `stdout_tail` 包含 `phase3 script ok python=3.11.7`
   - guest hello python_version 为 `3.11.7`
 
+### IDA plugin install smoke verification
+
+- IDA plugin install smoke 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
+- Verified run:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26903926544
+attempt 1
+conclusion=success
+runner=HostMachine
+artifact=disposable-vm-guest-agent-smoke
+```
+
+- 验证输入：
+
+```text
+task_action=ida_plugin_install
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+controller_url=http://192.168.1.249:8766
+```
+
+- Artifact 中确认：
+  - guest 验证 `C:\Users\alion\Desktop\IDAPro8.3` 存在。
+  - guest 找到 IDA executables: `ida.exe`, `ida64.exe`, `idat.exe`, `idat64.exe`。
+  - guest 安装 plugin 到 `C:\Users\alion\AppData\Roaming\Hex-Rays\IDA Pro\plugins`。
+  - 已安装 `ida_script_mcp.py`、`ida_script_mcp_protocol.py`、`ida_script_mcp_execution.py`、`ida_script_mcp_change_protocol.py`、`ida_script_mcp_change_recorder.py`。
+  - guest 对安装文件完成 SHA-256 校验和 `py_compile` 校验。
+  - guest standalone import 校验通过：`ida_script_mcp_protocol`、`ida_script_mcp_execution`、`ida_script_mcp_change_protocol`。
+  - guest 写入 `ida_script_mcp_install_manifest.json`。
+  - `result.json` status 为 `completed`，exit_code 为 `0`。
+  - `stdout_tail` 包含 `IDA_PLUGIN_INSTALL_VERIFY_RESULT=` 和 `"status": "installed"`。
+
 ### Tests
 
 - 已新增 protocol / host controller / guest agent / guest dependency check 单元测试。
@@ -235,25 +267,6 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - guest 解包并部署测试环境。
 - guest 运行真实 IDA integration deployment/test steps。
 - host 收集 logs/artifacts 并按 guest exit code 决定 workflow success/failure。
-
-### IDA plugin install smoke 实机验证
-
-- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
-- 输入：
-
-```text
-task_action=ida_plugin_install
-ida_dir=C:\Users\alion\Desktop\IDAPro8.3
-controller_url=http://192.168.1.249:8766
-```
-
-- 验收：
-  - guest 验证 `ida_dir` 存在且包含 IDA executable
-  - guest 安装 `ida_script_mcp.py` 和 support files
-  - guest 生成 `ida_script_mcp_install_manifest.json`
-  - guest result 包含 `IDA_PLUGIN_INSTALL_VERIFY_RESULT=`
-  - guest result 包含 `exit_code=0`
-  - workflow conclusion 为 success
 
 ### 后续增强
 
