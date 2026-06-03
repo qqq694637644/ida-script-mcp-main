@@ -15,10 +15,10 @@ jobs:
   smoke:
     name: HostMachine smoke
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
-      - name: Print runner context
+      - name: Verify GitHub can dispatch to HostMachine
         shell: cmd
         run: |
           echo RUNNER_NAME=%RUNNER_NAME%
@@ -26,17 +26,9 @@ jobs:
           echo RUNNER_ARCH=%RUNNER_ARCH%
           echo RUNNER_TEMP=%RUNNER_TEMP%
           echo GITHUB_WORKSPACE=%GITHUB_WORKSPACE%
+          echo USERNAME=%USERNAME%
+          echo COMPUTERNAME=%COMPUTERNAME%
           whoami
           hostname
-          if not "%RUNNER_NAME%"=="HostMachine" echo Warning: expected HostMachine, got %RUNNER_NAME%
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Verify checkout and host tools
-        shell: cmd
-        run: |
-          git --version || exit /b 1
-          git status --short || exit /b 1
-          where python >nul 2>nul && python --version || echo python not found on host runner; runner dispatch/checkout smoke still passed.
-          echo Host runner smoke completed.
+          if not "%RUNNER_NAME%"=="HostMachine" exit /b 1
+          echo Host runner dispatch smoke passed.
