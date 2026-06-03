@@ -1220,6 +1220,30 @@ def _required_gui_type_api():
     return setter
 
 
+def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
+    if not HAS_IDA:
+        raise RuntimeError("IDA runtime is unavailable for GUI change replay")
+    module = __import__("ida_bytes")
+    patch_bytes = getattr(module, "patch_bytes", None)
+    patch_byte = getattr(module, "patch_byte", None)
+
+    if patch_bytes is None and patch_byte is None:
+        raise RuntimeError("Required IDAPython API is unavailable: ida_bytes.patch_bytes")
+
+    if patch_bytes is not None:
+        ok = patch_bytes(ea, data)
+        if ok:
+            return True
+
+    if patch_byte is None:
+        return False
+
+    for offset, value in enumerate(data):
+        if not patch_byte(ea + offset, value):
+            return False
+    return True
+
+
 def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
     op = operation.op
     try:
@@ -1241,8 +1265,7 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
                 raise RuntimeError(f"No function found for address {hex(int(operation.ea))}")
             ok = set_func_cmt(func, operation.text, int(operation.repeatable))
         elif op == "patch_bytes":
-            patch_bytes = _required_gui_api("ida_bytes", "patch_bytes")
-            ok = patch_bytes(operation.ea, bytes.fromhex(operation.new_bytes_hex))
+            ok = _patch_bytes_with_fallback(operation.ea, bytes.fromhex(operation.new_bytes_hex))
         elif op == "set_type":
             setter = _required_gui_type_api()
             ok = setter(operation.ea, operation.decl)

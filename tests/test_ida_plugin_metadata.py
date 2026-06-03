@@ -391,6 +391,43 @@ def test_apply_changes_dry_run_does_not_call_write_apis(monkeypatch):
     assert len(result["skipped"]) == len(_all_supported_operations())
 
 
+def test_apply_changes_patch_bytes_falls_back_to_patch_byte(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_bytes",
+        types.SimpleNamespace(
+            patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or False,
+            patch_byte=lambda ea, value: calls.append(("patch_byte", ea, value)) or True,
+        ),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(
+            operations=[
+                {
+                    "op_id": "op-patch-byte",
+                    "op": "patch_bytes",
+                    "ea": 0x1000,
+                    "source": "explicit_api",
+                    "old_bytes_hex": "558b",
+                    "new_bytes_hex": "90cc",
+                }
+            ],
+            dry_run=False,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["errors"] == []
+    assert result["applied"][0]["op_id"] == "op-patch-byte"
+    assert ("patch_bytes", 0x1000, b"\x90\xcc") in calls
+    assert ("patch_byte", 0x1000, 0x90) in calls
+    assert ("patch_byte", 0x1001, 0xCC) in calls
+
+
 def test_apply_changes_non_dry_run_stops_after_first_error(monkeypatch):
     _clean_matching_metadata(monkeypatch)
     monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
