@@ -121,6 +121,9 @@ py -3.11 -m ida_script_mcp.guest_vm.agent `
   --guest-id ida-test-vm
 ```
 
+The `--controller-url` value may also be passed as `<host-vmnet-ip>:8766`; the
+agent normalizes a missing scheme to `http://` before calling the host.
+
 For autostart, configure the same command in the snapshot. The agent also reads
 `IDA_SCRIPT_MCP_CONTROLLER_URL`, `IDA_SCRIPT_MCP_GUEST_ID`,
 `IDA_SCRIPT_MCP_GUEST_BOOT_ID`, and `IDA_SCRIPT_MCP_GUEST_WORK_ROOT`.

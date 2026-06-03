@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 GUEST_DEPENDENCY_HINT = (
     "The guest VM snapshot must have guest dependencies installed before the "
@@ -80,6 +81,24 @@ def tail_text(value: str | bytes | None, max_bytes: int) -> str:
     if len(data) <= max_bytes:
         return text
     return data[-max_bytes:].decode("utf-8", errors="replace")
+
+
+def normalize_controller_url(value: str) -> str:
+    """Return a requests-compatible controller URL.
+
+    Operators often type a reachable endpoint as ``host:port``. ``requests``
+    needs an explicit scheme, so treat a missing scheme as ``http://``.
+    """
+
+    url = value.strip().rstrip("/")
+    if not url:
+        raise ValueError("controller_url must not be empty")
+    if "://" not in url:
+        url = f"http://{url}"
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"controller_url must be an HTTP URL, got {value!r}")
+    return url
 
 
 def normalize_command(value: Any) -> list[str]:
@@ -306,7 +325,7 @@ def execute_payload(
 
 
 def _hello_with_retry(session: Any, config: AgentConfig, hello: dict[str, Any]) -> dict[str, Any]:
-    controller_url = config.controller_url.rstrip("/")
+    controller_url = normalize_controller_url(config.controller_url)
     last_error: BaseException | None = None
     for attempt in range(1, config.connect_retries + 1):
         try:
@@ -336,7 +355,7 @@ def run_once(config: AgentConfig, session: Any | None = None) -> int:
     if session is None:
         session = requests.Session()
 
-    controller_url = config.controller_url.rstrip("/")
+    controller_url = normalize_controller_url(config.controller_url)
     try:
         hello = build_hello(config)
         hello_response = _hello_with_retry(session, config, hello)
@@ -418,7 +437,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def config_from_args(args: argparse.Namespace) -> AgentConfig:
     return AgentConfig(
-        controller_url=str(args.controller_url).rstrip("/"),
+        controller_url=normalize_controller_url(str(args.controller_url)),
         guest_id=args.guest_id,
         agent_version=args.agent_version,
         boot_id=args.boot_id,

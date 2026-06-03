@@ -1,11 +1,6 @@
 name: Disposable VM guest agent smoke
 
 on:
-  push:
-    branches:
-      - gpt/execute-subsystem-20260602-1dc47a
-    paths:
-      - ".github/workflows/disposable-vm-guest-agent-smoke.yml"
   workflow_dispatch:
     inputs:
       controller_url:
