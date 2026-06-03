@@ -520,6 +520,8 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
 
         target_ea = int(functions[0]["start_ea"])
         target_hex = hex(target_ea)
+        patch_target_ea = 0x180002308
+        patch_target_hex = hex(patch_target_ea)
         _stage("apply_changes_inspect_before_start", {"address": target_hex})
         inspect_before = _json_request(
             "POST",
@@ -536,20 +538,37 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         _check(result, "inspect_address reads at least one byte", len(before_bytes) >= 2, before_body)
         _stage("apply_changes_inspect_before_done")
 
+        _stage("apply_changes_patch_inspect_before_start", {"address": patch_target_hex})
+        patch_inspect_before = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": patch_target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["patch_inspect_before"] = patch_inspect_before["body"]
+        patch_before_body = patch_inspect_before["body"]
+        _check(result, "patch target address resolves", patch_before_body.get("found") is True, patch_before_body)
+        patch_before_bytes = patch_before_body.get("bytes_hex") or ""
+        _check(result, "patch target reads at least one byte", len(patch_before_bytes) >= 2, patch_before_body)
+        _stage("apply_changes_patch_inspect_before_done")
+
         run_id = str(int(time.time()))
         new_name = f"mcp_apply_e2e_{run_id}"
         comment_text = f"mcp regular comment {run_id}"
         func_comment_text = f"mcp function comment {run_id}"
         old_first_byte = before_bytes[:2]
-        new_first_byte = "90" if old_first_byte.lower() != "90" else "cc"
+        patch_old_first_byte = patch_before_bytes[:2]
+        patch_new_first_byte = "90" if patch_old_first_byte.lower() != "90" else "cc"
         decl = f"int __cdecl {new_name}(void);"
         patch_operation = {
             "op_id": "op-patch-byte",
             "op": "patch_bytes",
-            "ea": target_ea,
+            "ea": patch_target_ea,
             "source": "explicit_api",
-            "old_bytes_hex": old_first_byte,
-            "new_bytes_hex": new_first_byte,
+            "old_bytes_hex": patch_old_first_byte,
+            "new_bytes_hex": patch_new_first_byte,
         }
         destructive_operations = [
             {
@@ -576,6 +595,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 "text": func_comment_text,
                 "repeatable": False,
             },
+            patch_operation,
             {
                 "op_id": "op-set-type",
                 "op": "set_type",
@@ -585,7 +605,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 "flags": 0,
             },
         ]
-        dry_run_operations = destructive_operations + [patch_operation]
+        dry_run_operations = destructive_operations
         change_set = {
             "schema_version": 1,
             "job_id": f"apply-e2e-{run_id}",
@@ -641,6 +661,23 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         _check(result, "dry-run leaves comment unchanged", dry_inspect.get("comment") == before_body.get("comment"), dry_inspect)
         _check(result, "dry-run leaves function comment unchanged", dry_inspect.get("function_comment") == before_body.get("function_comment"), dry_inspect)
 
+        patch_inspect_after_dry_run = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": patch_target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["patch_inspect_after_dry_run"] = patch_inspect_after_dry_run["body"]
+        patch_dry_body = patch_inspect_after_dry_run["body"]
+        _check(
+            result,
+            "dry-run leaves patch target byte unchanged",
+            (patch_dry_body.get("bytes_hex") or "")[:2].lower() == patch_old_first_byte.lower(),
+            patch_dry_body,
+        )
+
         metadata_after_dry_run = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
         result["responses"]["metadata_after_dry_run"] = metadata_after_dry_run["body"]
         _check(result, "metadata stays clean after dry-run", metadata_after_dry_run["body"].get("dirty") is False, metadata_after_dry_run["body"])
@@ -648,13 +685,6 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         destructive_change_set = json.loads(json.dumps(change_set))
         destructive_change_set["operations"] = destructive_operations
         destructive_change_set["dry_run"] = False
-        result.setdefault("warnings", []).append(
-            {
-                "name": "patch_bytes destructive apply skipped",
-                "reason": "selected real IDA smoke addresses can be non-patchable; dry-run covers patch_bytes protocol validation",
-                "operation": patch_operation,
-            }
-        )
         _stage("apply_changes_destructive_start")
         apply_destructive = _json_request(
             "POST",
@@ -684,6 +714,23 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         _check(result, "applied rename is visible", after_body.get("name") == new_name, after_body)
         _check(result, "applied comment is visible", after_body.get("comment") == comment_text, after_body)
         _check(result, "applied function comment is visible", after_body.get("function_comment") == func_comment_text, after_body)
+
+        patch_inspect_after_apply = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": patch_target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["patch_inspect_after_apply"] = patch_inspect_after_apply["body"]
+        patch_after_body = patch_inspect_after_apply["body"]
+        _check(
+            result,
+            "applied patch byte is visible",
+            (patch_after_body.get("bytes_hex") or "")[:2].lower() == patch_new_first_byte.lower(),
+            patch_after_body,
+        )
         type_text = after_body.get("type") or ""
         if new_name not in type_text and "int" not in type_text:
             result.setdefault("warnings", []).append(
