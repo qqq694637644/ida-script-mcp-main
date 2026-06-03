@@ -1,6 +1,6 @@
 # IDA Script MCP
 
-IDA Script MCP connects AI assistants to live IDA Pro databases through the Model Context Protocol (MCP). The current branch is a breaking, security-focused rewrite that keeps common reverse-engineering reads simple while moving custom IDAPython execution and database mutations behind isolated execution, explicit replay, fingerprint checks, and real IDA workflow tests.
+IDA Script MCP connects AI assistants to IDA Pro databases through the Model Context Protocol (MCP). The current branch is a breaking, security-focused rewrite that keeps common reverse-engineering reads simple while moving custom IDAPython queries and database mutations behind headless isolated execution, process-level hard timeouts, explicit replay, fingerprint checks, and real IDA workflow tests.
 
 This README describes the current PR branch, not the older 1.1-era README.
 
@@ -10,9 +10,9 @@ Earlier versions allowed a convenient but risky pattern: run arbitrary IDAPython
 
 The current version solves that by adding a V2.3 isolated execution design and a disposable-VM integration test pipeline:
 
-- **Public `execute_idapython` is isolated-only.** It copies a saved clean IDB/I64 database and runs code in a separate IDA worker process. It does not fall back to GUI `/execute`.
+- **Public `execute_idapython` is isolated-only.** It copies a saved clean IDB/I64 database and runs query/execution code in a separate headless IDA worker process with a hard process timeout. It does not fall back to GUI `/execute`.
 - **GUI `/execute` is disabled by default.** The plugin returns HTTP 410 for GUI execute requests unless an explicit development escape hatch is enabled.
-- **Changes are replayed explicitly.** Worker-side changes are represented as a structured `ChangeSet` and replayed through GUI `/apply_changes` or the MCP `apply_worker_changes` tool.
+- **Only reviewed writes reach the GUI database.** Worker-side changes are represented as a structured `ChangeSet` and replayed through GUI `/apply_changes` or the MCP `apply_worker_changes` tool. Query code itself does not execute in the GUI database.
 - **Database identity is checked.** Replay uses a saved database SHA-256 fingerprint. Bad fingerprints are rejected.
 - **Dirty/unsaved state is fail-closed.** If the GUI database is dirty or identity is unknown, destructive apply is rejected. On IDA 8.3 where some dirty APIs are unavailable, the plugin tracks an internal mutation flag after successful apply.
 - **Dry-run is the default.** `/apply_changes` defaults to dry-run and must be explicitly called with `dry_run=false` to mutate the database.
@@ -28,16 +28,22 @@ AI client / MCP client
         v
 ida-script-mcp server
         |
-        |  read tools call plugin HTTP endpoints
-        |  execute_idapython launches an isolated worker
-        |  apply_worker_changes replays ChangeSet through GUI plugin
-        v
-IDA-Script-MCP plugin inside IDA GUI
+        |  safe context: ask GUI plugin for metadata, instance, saved DB path, fingerprint
         |
-        |  localhost HTTP endpoints
+        |  queries/custom IDAPython:
+        |    copy saved clean IDB/I64
+        |    launch headless IDA worker process
+        |    enforce hard process timeout / kill process tree
+        |    collect result.json and optional ChangeSet
+        |
+        |  writes:
+        |    apply_worker_changes -> GUI plugin /apply_changes
+        |    verify fingerprint and dirty/unsaved state
         v
-Live IDA database
+GUI IDA database is mutated only by explicit apply_changes replay
 ```
+
+The important boundary is: **queries run in the headless worker copy; writes are explicit GUI replays.** The live GUI IDA process provides context and applies reviewed changes, but it is not the execution sandbox for arbitrary query code.
 
 The disposable VM test path adds:
 
@@ -61,7 +67,7 @@ GitHub workflow_dispatch
 | `list_functions` | Enumerate functions with pagination and filters. | No |
 | `decompile_function` | Return Hex-Rays pseudocode and optional disassembly. | No |
 | `get_xrefs` | Return xrefs to/from an address or symbol. | No |
-| `execute_idapython` | Run IDAPython in an isolated worker database copy. | Worker copy only |
+| `execute_idapython` | Run IDAPython queries in a headless isolated worker database copy with a hard process timeout. | Worker copy only |
 | `apply_worker_changes` | Preview or apply a worker `ChangeSet` to the GUI database. | Yes, only when `dry_run=false` |
 
 The plugin also exposes HTTP endpoints used by the MCP server and workflow tests:
@@ -163,17 +169,18 @@ The default MCP transport is stdio.
 1. Run `list_ida_instances` when more than one IDA database may be open.
 2. Run `get_ida_database_info` before making assumptions about the active database.
 3. Use read-only tools first: `list_functions`, `decompile_function`, `get_xrefs`.
-4. Use `execute_idapython` for long-tail analysis only; it runs in an isolated copied database.
+4. Use `execute_idapython` for long-tail custom queries; it runs in a headless isolated copied database with a process-level timeout.
 5. If worker changes are collected, call `apply_worker_changes` first as dry-run.
 6. Only call `apply_worker_changes` with `dry_run=false` after checking the fingerprint and confirming the GUI database is clean.
 
 ## `execute_idapython` behavior
 
-`execute_idapython` is intentionally isolated:
+`execute_idapython` is intentionally isolated and headless:
 
 ```text
 GUI IDA metadata -> saved clean database fingerprint -> copied IDB/I64
--> worker IDA process -> result.json -> optional ChangeSet
+-> headless IDA worker process -> hard timeout / process-tree kill
+-> result.json -> optional ChangeSet
 ```
 
 It can return statuses such as:
@@ -193,7 +200,7 @@ Important rules:
 
 - The public schema does not expose `in_process`, `isolation`, or `auto_apply` toggles.
 - GUI `/execute` is rejected by default.
-- The worker database copy may be mutated; the GUI database is not changed by `execute_idapython` itself.
+- Query code runs in the worker database copy. The GUI database is not changed by `execute_idapython` itself.
 - Replay requires `apply_worker_changes` / `/apply_changes`.
 
 ## `apply_changes` behavior
