@@ -428,6 +428,41 @@ def test_apply_changes_patch_bytes_falls_back_to_patch_byte(monkeypatch):
     assert ("patch_byte", 0x1001, 0xCC) in calls
 
 
+def test_apply_changes_patch_bytes_accepts_void_return(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_bytes",
+        types.SimpleNamespace(
+            patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)),
+            patch_byte=lambda ea, value: calls.append(("patch_byte", ea, value)) or False,
+        ),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(
+            operations=[
+                {
+                    "op_id": "op-patch-byte",
+                    "op": "patch_bytes",
+                    "ea": 0x1000,
+                    "source": "explicit_api",
+                    "old_bytes_hex": "55",
+                    "new_bytes_hex": "90",
+                }
+            ],
+            dry_run=False,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["errors"] == []
+    assert result["applied"][0]["op_id"] == "op-patch-byte"
+    assert calls == [("patch_bytes", 0x1000, b"\x90")]
+
+
 def test_apply_changes_patch_bytes_falls_back_to_idc_patch_byte(monkeypatch):
     _clean_matching_metadata(monkeypatch)
     monkeypatch.setattr(ida_plugin, "HAS_IDA", True)

@@ -1241,17 +1241,33 @@ def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
 
     attempts = []
     if patch_bytes is not None:
-        ok = patch_bytes(ea, data)
-        if ok:
-            return True
-        attempts.append("ida_bytes.patch_bytes returned failure")
+        try:
+            result = patch_bytes(ea, data)
+        except Exception as exc:
+            attempts.append(f"ida_bytes.patch_bytes raised {type(exc).__name__}: {exc}")
+        else:
+            if result is not False:
+                return True
+            attempts.append("ida_bytes.patch_bytes returned failure")
+
+    def _byte_matches(address: int, value: int) -> bool:
+        try:
+            return int(module.get_byte(address)) == value
+        except Exception:
+            pass
+        try:
+            idc_module = __import__("idc")
+            return int(idc_module.get_wide_byte(address)) == value
+        except Exception:
+            return False
 
     for module_name, patch_byte in patch_byte_candidates:
         failed_at: int | None = None
         for offset, value in enumerate(data):
-            if not patch_byte(ea + offset, value):
-                failed_at = offset
-                break
+            if patch_byte(ea + offset, value) or _byte_matches(ea + offset, value):
+                continue
+            failed_at = offset
+            break
         if failed_at is None:
             return True
         attempts.append(f"{module_name}.patch_byte returned failure at offset {failed_at}")
