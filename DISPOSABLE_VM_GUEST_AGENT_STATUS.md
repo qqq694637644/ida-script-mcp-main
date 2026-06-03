@@ -104,8 +104,7 @@ ida-script-mcp-vm-guest-check-imports
 
 - workflow 已支持 Phase 3 Python script payload：
   - input `task_action=python_script`
-  - input `script_text`, default 为打印 guest Python 版本和 executable 的 UTF-8 Python script
-  - workflow 将 `script_text` 写入 HostMachine 临时 payload file
+  - workflow 将内置 Phase 3 smoke script 写入 HostMachine 临时 payload file
   - host controller 使用 `--script-path` 读取 payload 并下发给 guest
   - guest 将 payload 写入 per-job directory 的 `payload.py` 并用 guest 当前 Python 执行
   - guest 回传 stdout/stderr/exit_code 和 metadata
@@ -198,7 +197,6 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 
 ```text
 task_action=python_script
-script_text=import platform, sys; print("phase3 script ok python=" + platform.python_version() + " executable=" + sys.executable)
 controller_url=http://192.168.1.249:8766
 ```
 

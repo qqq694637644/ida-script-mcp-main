@@ -334,7 +334,8 @@ Implementation status:
 
 ```text
 Implemented in host controller, guest agent, and disposable VM workflow.
-Workflow inputs: task_action=python_script, script_text=<UTF-8 Python script>
+Workflow input: task_action=python_script
+Workflow writes a built-in UTF-8 Phase 3 smoke script and passes it to host controller with --script-path.
 Verification status: pending Phase 3 workflow_dispatch run.
 ```
 

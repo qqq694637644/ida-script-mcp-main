@@ -160,8 +160,10 @@ The workflow exposes phase-3 script payload support through these inputs:
 
 ```text
 task_action=python_script
-script_text=import platform; print("phase3 script ok python=" + platform.python_version())
 ```
+
+For the Phase 3 smoke path, the workflow writes a built-in UTF-8 script payload
+on HostMachine and passes that file to the host controller with `--script-path`.
 
 ## Host result files
 
