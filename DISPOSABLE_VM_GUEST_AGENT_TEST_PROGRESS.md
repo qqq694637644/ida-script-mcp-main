@@ -280,6 +280,24 @@ Added /xrefs invalid xref_kind check.
 Both are non-destructive and should be included in the next full rerun.
 ```
 
+### Run 26909020426 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26909020426
+Commit: bbe8e5112175aa3efd1d275af04bfe3d3d929b00
+Inputs: task_action=ida_plugin_api_test, ida_api_test_mode=full, ida_timeout_seconds=180, run_timeout_seconds=300
+Conclusion: success
+Artifact ID: 7395106677
+Result summary: external full harness succeeded in 5.766 seconds with the additional non-destructive corner checks.
+Verified endpoints: /health, /metadata, /functions, /decompile, /xrefs, rejected /execute, unknown route 404.
+Verified additional corner cases: /functions offset beyond total returned returned=0 and functions=[]; /xrefs invalid xref_kind returned structured error `Unsupported xref_kind: 'nonsense'`.
+Verified decompile: selected function sub_180001000 returned found=true, disassembly list, and Hex-Rays pseudocode.
+Verified xrefs: direction=to returned structured empty list, direction=from returned two xrefs, invalid direction returned structured error, invalid xref_kind returned structured error.
+Verified safety: GUI /execute returned HTTP 410 with status=rejected.
+IDA log note: support-file PLUGIN_ENTRY and relative-import errors remain absent. Patching plugin action registration warnings remain unrelated.
+Current status: IDA plugin API smoke for test1.dll is verified for non-destructive basic/full endpoint coverage.
+```
+
 ## Update protocol
 
 After every real workflow run, append:

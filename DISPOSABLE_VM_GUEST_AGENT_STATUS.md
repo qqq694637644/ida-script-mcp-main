@@ -156,10 +156,13 @@ ida-script-mcp-vm-guest-check-automation-imports
   - input `task_action=ida_plugin_api_test`
   - input `ida_dir`, default `C:\Users\alion\Desktop\IDAPro8.3`
   - input `dll_path`, default `C:\Users\alion\Desktop\test1.dll`
+  - input `ida_api_test_mode`, default `basic`，可选 `full`
+  - input `ida_timeout_seconds`, default `180`
   - HostMachine 动态生成 guest-side payload。
   - guest 安装/更新插件文件，启动 IDA 打开 DLL，等待 `ida_auto.auto_wait()`。
-  - guest 在 IDA 内启动插件 HTTP server，并从非 IDA main thread 测试实际 HTTP endpoints。
-  - 当前计划覆盖 `/health`、`/metadata`、`/functions`、`/decompile`、`/xrefs`、GUI `/execute` 禁用、未知路由 404。
+  - IDA 内 bootstrap 只负责启动插件并写 `ida_ready.json`。
+  - guest 在 IDA 进程外测试实际 HTTP endpoints，避免 IDA 内部测试线程卡住。
+  - 当前覆盖 `/health`、`/metadata`、`/functions`、`/decompile`、`/xrefs`、GUI `/execute` 禁用、未知路由 404。
   - 详细测试进度和 corner case 清单保存在根目录 `DISPOSABLE_VM_GUEST_AGENT_TEST_PROGRESS.md`。
 
 ### Phase 1 verification
@@ -242,10 +245,20 @@ controller_url=http://192.168.1.249:8766
 ### IDA plugin install smoke verification
 
 - IDA plugin install smoke 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
-- Verified run:
+- Initial verified run:
 
 ```text
 https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26903926544
+attempt 1
+conclusion=success
+runner=HostMachine
+artifact=disposable-vm-guest-agent-smoke
+```
+
+- Support package layout verified run:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26907543538
 attempt 1
 conclusion=success
 runner=HostMachine
@@ -264,12 +277,59 @@ controller_url=http://192.168.1.249:8766
   - guest 验证 `C:\Users\alion\Desktop\IDAPro8.3` 存在。
   - guest 找到 IDA executables: `ida.exe`, `ida64.exe`, `idat.exe`, `idat64.exe`。
   - guest 安装 plugin 到 `C:\Users\alion\AppData\Roaming\Hex-Rays\IDA Pro\plugins`。
-  - 已安装 `ida_script_mcp.py`、`ida_script_mcp_protocol.py`、`ida_script_mcp_execution.py`、`ida_script_mcp_change_protocol.py`、`ida_script_mcp_change_recorder.py`。
+  - 已安装 `ida_script_mcp.py` 和 `ida_script_mcp_support` package layout。
   - guest 对安装文件完成 SHA-256 校验和 `py_compile` 校验。
-  - guest standalone import 校验通过：`ida_script_mcp_protocol`、`ida_script_mcp_execution`、`ida_script_mcp_change_protocol`。
+  - guest standalone import 校验通过：`ida_script_mcp_support.protocol`、`ida_script_mcp_support.execution`、`ida_script_mcp_support.change_protocol`、`ida_script_mcp_support.change_recorder`。
   - guest 写入 `ida_script_mcp_install_manifest.json`。
   - `result.json` status 为 `completed`，exit_code 为 `0`。
   - `stdout_tail` 包含 `IDA_PLUGIN_INSTALL_VERIFY_RESULT=` 和 `"status": "installed"`。
+
+### IDA DLL/plugin API smoke verification
+
+- IDA DLL/plugin API smoke 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
+- Basic verified run:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26908653405
+attempt 1
+conclusion=success
+runner=HostMachine
+artifact=disposable-vm-guest-agent-smoke
+```
+
+- Full verified run with non-destructive corner cases:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26909020426
+attempt 1
+conclusion=success
+runner=HostMachine
+artifact=disposable-vm-guest-agent-smoke
+```
+
+- 验证输入：
+
+```text
+task_action=ida_plugin_api_test
+ida_api_test_mode=full
+ida_timeout_seconds=180
+run_timeout_seconds=300
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+controller_url=http://192.168.1.249:8766
+```
+
+- Artifact 中确认：
+  - guest 验证 `dll_path` 和 `ida_dir` 存在。
+  - guest 安装/更新插件文件，且旧 root-level support files 不再污染 IDA plugin scan。
+  - guest 用 IDA 打开 `test1.dll` 并等待 auto-analysis 完成。
+  - guest 启动插件 HTTP server，并写入 `ida_ready.json`。
+  - guest 从 IDA 进程外测试 `/health`、`/metadata`、`/functions`、`/decompile`、`/xrefs`、GUI `/execute` 禁用和未知路由 404。
+  - `/functions` offset beyond total 返回 `returned=0` 和 `functions=[]`。
+  - `/xrefs` invalid direction 和 invalid xref_kind 都返回结构化 error。
+  - `/execute` 返回 HTTP 410，`status=rejected`。
+  - `result.json` status 为 `completed`，exit_code 为 `0`。
+  - guest payload 总耗时约 5.8 秒，没有长时间卡住。
 
 ### Tests
 
@@ -278,7 +338,7 @@ controller_url=http://192.168.1.249:8766
 
 ```text
 py -3 -m pytest -q
-116 passed
+127 passed
 
 py -3 -m ruff check src tests
 All checks passed
@@ -310,28 +370,6 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - guest 解包并部署测试环境。
 - guest 运行真实 IDA integration deployment/test steps。
 - host 收集 logs/artifacts 并按 guest exit code 决定 workflow success/failure。
-
-### IDA DLL/plugin API smoke 实机验证
-
-- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
-- 输入：
-
-```text
-task_action=ida_plugin_api_test
-ida_dir=C:\Users\alion\Desktop\IDAPro8.3
-dll_path=C:\Users\alion\Desktop\test1.dll
-controller_url=http://192.168.1.249:8766
-```
-
-- 验收：
-  - guest 验证 `dll_path` 和 `ida_dir` 存在。
-  - guest 安装/更新插件文件。
-  - guest 用 IDA 打开 `test1.dll` 并等待 auto-analysis 完成。
-  - guest 启动插件 HTTP server。
-  - guest 测试 metadata/functions/decompile/xrefs/execute-disabled/404 等实际 endpoints。
-  - guest result 包含 `IDA_PLUGIN_API_TEST_RESULT=`。
-  - guest result 包含 `exit_code=0`。
-  - workflow conclusion 为 success。
 
 ### IDA GUI automation test plan
 
