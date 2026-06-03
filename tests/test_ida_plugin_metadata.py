@@ -504,6 +504,79 @@ def test_apply_changes_patch_bytes_falls_back_to_idc_patch_byte(monkeypatch):
     assert ("idc_patch_byte", 0x1000, 0x90) in calls
 
 
+def test_apply_changes_set_type_uses_ida_typeinf_apply_cdecl(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+    monkeypatch.setitem(sys.modules, "idc", types.SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_typeinf",
+        types.SimpleNamespace(
+            TINFO_DEFINITE=0x1,
+            apply_cdecl=lambda til, ea, decl, flags: calls.append(
+                ("apply_cdecl", til, ea, decl, flags)
+            )
+            or True,
+        ),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(
+            operations=[
+                {
+                    "op_id": "op-set-type",
+                    "op": "set_type",
+                    "ea": 0x1000,
+                    "source": "explicit_api",
+                    "decl": "int __cdecl mcp_apply_e2e(void);",
+                    "flags": 0,
+                }
+            ],
+            dry_run=False,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["errors"] == []
+    assert calls == [
+        ("apply_cdecl", None, 0x1000, "int __cdecl mcp_apply_e2e(void);", 0x1)
+    ]
+
+
+def test_apply_changes_set_type_supports_legacy_set_type_name(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+    monkeypatch.setitem(
+        sys.modules,
+        "idc",
+        types.SimpleNamespace(
+            SetType=lambda ea, decl: calls.append(("SetType", ea, decl)) or True
+        ),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(
+            operations=[
+                {
+                    "op_id": "op-set-type",
+                    "op": "set_type",
+                    "ea": 0x1000,
+                    "source": "explicit_api",
+                    "decl": "int __cdecl mcp_apply_e2e(void);",
+                    "flags": 0,
+                }
+            ],
+            dry_run=False,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["errors"] == []
+    assert calls == [("SetType", 0x1000, "int __cdecl mcp_apply_e2e(void);")]
+
+
 def test_apply_changes_non_dry_run_stops_after_first_error(monkeypatch):
     _clean_matching_metadata(monkeypatch)
     monkeypatch.setattr(ida_plugin, "HAS_IDA", True)

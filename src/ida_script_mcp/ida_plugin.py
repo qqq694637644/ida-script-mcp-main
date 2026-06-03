@@ -1216,8 +1216,48 @@ def _required_gui_type_api():
     module = __import__("idc")
     setter = getattr(module, "set_type", None)
     if setter is None:
-        raise RuntimeError("Required IDAPython API is unavailable: idc.set_type")
+        setter = getattr(module, "SetType", None)
+    if setter is None:
+        raise RuntimeError("Required IDAPython API is unavailable: idc.set_type/idc.SetType")
     return setter
+
+
+def _apply_type_with_fallback(ea: int, decl: str) -> bool:
+    attempts = []
+    try:
+        setter = _required_gui_type_api()
+    except Exception as exc:
+        attempts.append(str(exc))
+    else:
+        try:
+            ok = setter(ea, decl)
+        except Exception as exc:
+            attempts.append(f"IDC type API raised {type(exc).__name__}: {exc}")
+        else:
+            if ok:
+                return True
+            attempts.append("IDC type API returned failure")
+
+    try:
+        ida_typeinf = __import__("ida_typeinf")
+    except Exception as exc:
+        attempts.append(f"ida_typeinf unavailable: {exc}")
+    else:
+        apply_cdecl = getattr(ida_typeinf, "apply_cdecl", None)
+        if apply_cdecl is None:
+            attempts.append("ida_typeinf.apply_cdecl is unavailable")
+        else:
+            flags = getattr(ida_typeinf, "TINFO_DEFINITE", 0)
+            try:
+                ok = apply_cdecl(None, ea, decl, flags)
+            except Exception as exc:
+                attempts.append(f"ida_typeinf.apply_cdecl raised {type(exc).__name__}: {exc}")
+            else:
+                if ok:
+                    return True
+                attempts.append("ida_typeinf.apply_cdecl returned failure")
+
+    raise RuntimeError("; ".join(attempts) or "IDA type apply APIs returned failure")
 
 
 def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
@@ -1298,8 +1338,7 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
         elif op == "patch_bytes":
             ok = _patch_bytes_with_fallback(operation.ea, bytes.fromhex(operation.new_bytes_hex))
         elif op == "set_type":
-            setter = _required_gui_type_api()
-            ok = setter(operation.ea, operation.decl)
+            ok = _apply_type_with_fallback(operation.ea, operation.decl)
         else:
             return OperationApplyResult(
                 op_id=operation.op_id, op=op, status="error", message="unsupported operation"
