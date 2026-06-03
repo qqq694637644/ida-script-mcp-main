@@ -63,7 +63,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ida-dir", default=DEFAULT_GUEST_IDA_DIR)
     parser.add_argument("--dll-path", default=DEFAULT_GUEST_DLL_PATH)
     parser.add_argument("--ida-timeout-seconds", type=int, default=DEFAULT_IDA_TIMEOUT_SECONDS)
-    parser.add_argument("--test-mode", default=DEFAULT_IDA_API_TEST_MODE, choices=["basic", "full"])
+    parser.add_argument(
+        "--test-mode",
+        default=DEFAULT_IDA_API_TEST_MODE,
+        choices=["basic", "full", "apply_changes"],
+    )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
 
@@ -429,6 +433,203 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         raise RuntimeError(f"/health did not become reachable: {last_error}")
 
 
+    def _run_apply_changes_tests(base_url: str, metadata: dict, functions_page: dict, result: dict) -> None:
+        functions = functions_page.get("functions") or []
+        _check(result, "apply_changes has selected function", bool(functions), functions_page)
+        _check(result, "metadata clean before destructive apply", metadata.get("dirty_state_known") is True and metadata.get("dirty") is False, metadata)
+        database_sha256 = metadata.get("database_sha256")
+        _check(result, "metadata includes database_sha256", bool(database_sha256), metadata)
+
+        target_ea = int(functions[0]["start_ea"])
+        target_hex = hex(target_ea)
+        _stage("apply_changes_inspect_before_start", {"address": target_hex})
+        inspect_before = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["inspect_before"] = inspect_before["body"]
+        before_body = inspect_before["body"]
+        _check(result, "inspect_address resolves selected function", before_body.get("found") is True, before_body)
+        before_bytes = before_body.get("bytes_hex") or ""
+        _check(result, "inspect_address reads at least one byte", len(before_bytes) >= 2, before_body)
+        _stage("apply_changes_inspect_before_done")
+
+        run_id = str(int(time.time()))
+        new_name = f"mcp_apply_e2e_{run_id}"
+        comment_text = f"mcp regular comment {run_id}"
+        func_comment_text = f"mcp function comment {run_id}"
+        old_first_byte = before_bytes[:2]
+        new_first_byte = "90" if old_first_byte.lower() != "90" else "cc"
+        decl = f"int __cdecl {new_name}(void);"
+        operations = [
+            {
+                "op_id": "op-rename",
+                "op": "rename",
+                "ea": target_ea,
+                "source": "explicit_api",
+                "new_name": new_name,
+                "flags": 0,
+            },
+            {
+                "op_id": "op-comment",
+                "op": "comment",
+                "ea": target_ea,
+                "source": "explicit_api",
+                "text": comment_text,
+                "repeatable": False,
+            },
+            {
+                "op_id": "op-function-comment",
+                "op": "function_comment",
+                "ea": target_ea,
+                "source": "explicit_api",
+                "text": func_comment_text,
+                "repeatable": False,
+            },
+            {
+                "op_id": "op-patch-byte",
+                "op": "patch_bytes",
+                "ea": target_ea,
+                "source": "explicit_api",
+                "old_bytes_hex": old_first_byte,
+                "new_bytes_hex": new_first_byte,
+            },
+            {
+                "op_id": "op-set-type",
+                "op": "set_type",
+                "ea": target_ea,
+                "source": "explicit_api",
+                "decl": decl,
+                "flags": 0,
+            },
+        ]
+        change_set = {
+            "schema_version": 1,
+            "job_id": f"apply-e2e-{run_id}",
+            "database_fingerprint": {"database_sha256": database_sha256},
+            "operations": operations,
+        }
+
+        bad_fingerprint = json.loads(json.dumps(change_set))
+        bad_fingerprint["database_fingerprint"]["database_sha256"] = "0" * 64
+        bad_fingerprint["dry_run"] = False
+        _stage("apply_changes_bad_fingerprint_start")
+        apply_bad_fingerprint = _json_request(
+            "POST",
+            base_url,
+            "/apply_changes",
+            bad_fingerprint,
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["apply_bad_fingerprint"] = apply_bad_fingerprint["body"]
+        _check(result, "bad fingerprint apply is rejected", apply_bad_fingerprint["body"].get("status") == "rejected", apply_bad_fingerprint["body"])
+        _stage("apply_changes_bad_fingerprint_done")
+
+        _stage("apply_changes_dry_run_default_start")
+        apply_dry_run_default = _json_request(
+            "POST",
+            base_url,
+            "/apply_changes",
+            change_set,
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["apply_dry_run_default"] = apply_dry_run_default["body"]
+        dry_body = apply_dry_run_default["body"]
+        _check(result, "default apply_changes is dry-run", dry_body.get("dry_run") is True, dry_body)
+        _check(result, "default dry-run status is ok", dry_body.get("status") == "ok", dry_body)
+        _check(result, "default dry-run applies nothing", dry_body.get("applied") == [], dry_body)
+        _check(result, "default dry-run skips all operations", len(dry_body.get("skipped") or []) == len(operations), dry_body)
+        _stage("apply_changes_dry_run_default_done")
+
+        inspect_after_dry_run = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["inspect_after_dry_run"] = inspect_after_dry_run["body"]
+        dry_inspect = inspect_after_dry_run["body"]
+        _check(result, "dry-run leaves name unchanged", dry_inspect.get("name") == before_body.get("name"), dry_inspect)
+        _check(result, "dry-run leaves first byte unchanged", (dry_inspect.get("bytes_hex") or "")[:2].lower() == old_first_byte.lower(), dry_inspect)
+        _check(result, "dry-run leaves comment unchanged", dry_inspect.get("comment") == before_body.get("comment"), dry_inspect)
+        _check(result, "dry-run leaves function comment unchanged", dry_inspect.get("function_comment") == before_body.get("function_comment"), dry_inspect)
+
+        metadata_after_dry_run = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+        result["responses"]["metadata_after_dry_run"] = metadata_after_dry_run["body"]
+        _check(result, "metadata stays clean after dry-run", metadata_after_dry_run["body"].get("dirty") is False, metadata_after_dry_run["body"])
+
+        destructive_change_set = json.loads(json.dumps(change_set))
+        destructive_change_set["dry_run"] = False
+        _stage("apply_changes_destructive_start")
+        apply_destructive = _json_request(
+            "POST",
+            base_url,
+            "/apply_changes",
+            destructive_change_set,
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["apply_destructive"] = apply_destructive["body"]
+        apply_body = apply_destructive["body"]
+        _check(result, "destructive apply status is ok", apply_body.get("status") == "ok", apply_body)
+        _check(result, "destructive apply applies all operations", len(apply_body.get("applied") or []) == len(operations), apply_body)
+        _check(result, "destructive apply has no errors", apply_body.get("errors") == [], apply_body)
+        _stage("apply_changes_destructive_done")
+
+        inspect_after_apply = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["inspect_after_apply"] = inspect_after_apply["body"]
+        after_body = inspect_after_apply["body"]
+        _check(result, "applied rename is visible", after_body.get("name") == new_name, after_body)
+        _check(result, "applied comment is visible", after_body.get("comment") == comment_text, after_body)
+        _check(result, "applied function comment is visible", after_body.get("function_comment") == func_comment_text, after_body)
+        _check(result, "applied patch byte is visible", (after_body.get("bytes_hex") or "")[:2].lower() == new_first_byte.lower(), after_body)
+        type_text = after_body.get("type") or ""
+        if new_name not in type_text and "int" not in type_text:
+            result.setdefault("warnings", []).append(
+                {
+                    "name": "applied type text did not contain expected signature fragments",
+                    "expected_name": new_name,
+                    "decl": decl,
+                    "observed_type": type_text,
+                }
+            )
+
+        metadata_after_apply = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+        result["responses"]["metadata_after_apply"] = metadata_after_apply["body"]
+        _check(result, "metadata dirty after destructive apply", metadata_after_apply["body"].get("dirty") is True, metadata_after_apply["body"])
+
+        _stage("apply_changes_rejected_when_dirty_start")
+        apply_rejected_when_dirty = _json_request(
+            "POST",
+            base_url,
+            "/apply_changes",
+            destructive_change_set,
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["apply_rejected_when_dirty"] = apply_rejected_when_dirty["body"]
+        dirty_body = apply_rejected_when_dirty["body"]
+        dirty_message = str(dirty_body.get("message") or "").lower()
+        _check(result, "second destructive apply is rejected when dirty", dirty_body.get("status") == "rejected", dirty_body)
+        _check(result, "dirty rejection message mentions unsaved or dirty", "unsaved" in dirty_message or "dirty" in dirty_message, dirty_body)
+        _stage("apply_changes_rejected_when_dirty_done")
+
+
     def _run_external_api_tests(ready: dict) -> dict:
         base_url = str(ready["base_url"])
         result = {
@@ -438,6 +639,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             "ready": ready,
             "checks": [],
             "responses": {},
+            "warnings": [],
             "selected_function": None,
         }
 
@@ -535,6 +737,13 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             _stage("functions_filter_done")
 
         if IDA_API_TEST_MODE == "basic":
+            result["status"] = "passed"
+            return result
+
+        if IDA_API_TEST_MODE == "apply_changes":
+            _stage("apply_changes_tests_start", {"address": start_ea_hex})
+            _run_apply_changes_tests(base_url, metadata["body"], functions_page["body"], result)
+            _stage("apply_changes_tests_done")
             result["status"] = "passed"
             return result
 
@@ -654,7 +863,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 raise RuntimeError(f"IDA directory does not exist: {ida_dir}")
             if not dll_path.is_file():
                 raise RuntimeError(f"DLL path does not exist: {dll_path}")
-            if IDA_API_TEST_MODE not in {"basic", "full"}:
+            if IDA_API_TEST_MODE not in {"basic", "full", "apply_changes"}:
                 raise RuntimeError(f"Unsupported IDA API test mode: {IDA_API_TEST_MODE!r}")
 
             plugin_dir = _install_plugin_files()

@@ -43,6 +43,9 @@ def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None
     assert '"/decompile"' in script
     assert '"/xrefs"' in script
     assert '"/execute"' in script
+    assert '"/apply_changes"' in script
+    assert '"/inspect_address"' in script
+    assert "_run_apply_changes_tests" in script
     compile(script, "<generated_ida_api_test_payload>", "exec")
 
 
@@ -62,6 +65,30 @@ def test_build_guest_ida_api_test_script_accepts_custom_paths(tmp_path) -> None:
     assert "IDA_TIMEOUT_SECONDS = 123" in script
     assert 'IDA_API_TEST_MODE = "full"' in script
     compile(script, "<generated_ida_api_test_payload>", "exec")
+
+
+def test_build_guest_ida_api_test_script_accepts_apply_changes_mode() -> None:
+    script = build_guest_ida_api_test_script(test_mode="apply_changes")
+
+    assert 'IDA_API_TEST_MODE = "apply_changes"' in script
+    assert '"/apply_changes"' in script
+    assert '"/inspect_address"' in script
+    assert "apply_changes_tests_start" in script
+    assert "__IDA_API_TEST_MODE_JSON__" not in script
+    compile(script, "<generated_ida_api_test_payload_apply_changes>", "exec")
+
+
+def test_disposable_vm_workflow_exposes_apply_changes_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_apply_changes_test" in workflow
+    assert "ida_plugin_apply_changes_test_payload.py" in workflow
+    assert "--test-mode apply_changes" in workflow
+    assert "- apply_changes" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
@@ -94,6 +121,34 @@ def test_generated_ida_api_payload_reports_missing_ida_dir(tmp_path) -> None:
 
     assert result.returncode == 1
     assert "IDA_PLUGIN_API_TEST_RESULT=" in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "HEARTBEAT_PATH" not in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_apply_changes_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "ida_api_apply_changes_payload.py"
+    script_path.write_text(
+        build_guest_ida_api_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+            test_mode="apply_changes",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "IDA_PLUGIN_API_TEST_RESULT=" in result.stdout
+    assert '"mode": "apply_changes"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "HEARTBEAT_PATH" not in result.stdout
     assert "validate_inputs_start" in result.stdout

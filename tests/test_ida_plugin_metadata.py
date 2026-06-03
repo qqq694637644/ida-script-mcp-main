@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import types
 
 from ida_script_mcp import ida_plugin
@@ -181,6 +182,227 @@ def _clean_matching_metadata(monkeypatch):
             "database_sha256": "abc",
         },
     )
+
+
+def _all_supported_operations() -> list[dict]:
+    return [
+        {
+            "op_id": "op-rename",
+            "op": "rename",
+            "ea": 0x1000,
+            "source": "explicit_api",
+            "new_name": "mcp_apply_e2e",
+            "flags": 0,
+        },
+        {
+            "op_id": "op-comment",
+            "op": "comment",
+            "ea": 0x1000,
+            "source": "explicit_api",
+            "text": "regular comment",
+            "repeatable": False,
+        },
+        {
+            "op_id": "op-function-comment",
+            "op": "function_comment",
+            "ea": 0x1000,
+            "source": "explicit_api",
+            "text": "function comment",
+            "repeatable": False,
+        },
+        {
+            "op_id": "op-patch-byte",
+            "op": "patch_bytes",
+            "ea": 0x1000,
+            "source": "explicit_api",
+            "old_bytes_hex": "55",
+            "new_bytes_hex": "90",
+        },
+        {
+            "op_id": "op-set-type",
+            "op": "set_type",
+            "ea": 0x1000,
+            "source": "explicit_api",
+            "decl": "int __cdecl mcp_apply_e2e(void);",
+            "flags": 0,
+        },
+    ]
+
+
+def test_apply_changes_applies_all_supported_operations(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+    func = types.SimpleNamespace(start_ea=0x1000)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_name",
+        types.SimpleNamespace(
+            set_name=lambda ea, new_name, flags: calls.append(("rename", ea, new_name, flags))
+            or True
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_bytes",
+        types.SimpleNamespace(
+            set_cmt=lambda ea, text, repeatable: calls.append(
+                ("comment", ea, text, repeatable)
+            )
+            or True,
+            patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or True,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_funcs",
+        types.SimpleNamespace(
+            get_func=lambda ea: func if ea == 0x1000 else None,
+            set_func_cmt=lambda function, text, repeatable: calls.append(
+                ("function_comment", function.start_ea, text, repeatable)
+            )
+            or True,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "idc",
+        types.SimpleNamespace(
+            set_type=lambda ea, decl: calls.append(("set_type", ea, decl)) or True
+        ),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(operations=_all_supported_operations(), dry_run=False)
+    )
+
+    assert result["status"] == "ok"
+    assert [item["op_id"] for item in result["applied"]] == [
+        "op-rename",
+        "op-comment",
+        "op-function-comment",
+        "op-patch-byte",
+        "op-set-type",
+    ]
+    assert result["errors"] == []
+    assert ("function_comment", 0x1000, "function comment", 0) in calls
+    assert ("patch_bytes", 0x1000, b"\x90") in calls
+
+
+def test_apply_changes_dry_run_does_not_call_write_apis(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(operations=_all_supported_operations(), dry_run=True)
+    )
+
+    assert result["status"] == "ok"
+    assert result["applied"] == []
+    assert result["errors"] == []
+    assert len(result["skipped"]) == len(_all_supported_operations())
+
+
+def test_apply_changes_non_dry_run_stops_after_first_error(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_bytes",
+        types.SimpleNamespace(
+            set_cmt=lambda ea, text, repeatable: calls.append(
+                ("comment", ea, text, repeatable)
+            )
+            or True,
+            patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or True,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_name",
+        types.SimpleNamespace(set_name=lambda ea, new_name, flags: False),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(
+            operations=[
+                _all_supported_operations()[1],
+                _all_supported_operations()[0],
+                _all_supported_operations()[3],
+            ],
+            dry_run=False,
+        )
+    )
+
+    assert result["status"] == "partial"
+    assert [item["op_id"] for item in result["applied"]] == ["op-comment"]
+    assert [item["op_id"] for item in result["errors"]] == ["op-rename"]
+    assert not any(call[0] == "patch_bytes" for call in calls)
+
+
+def test_inspect_address_data_returns_fake_ida_state(monkeypatch):
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(
+        ida_plugin,
+        "_collect_database_info",
+        lambda: {
+            "dirty_state_known": True,
+            "dirty": True,
+            "unsaved": True,
+            "database_identity_known": True,
+            "database_sha256": "abc",
+        },
+    )
+    monkeypatch.setattr(
+        ida_plugin,
+        "idc",
+        types.SimpleNamespace(
+            get_name=lambda ea: "mcp_apply_e2e" if ea == 0x401000 else "",
+            get_bytes=lambda ea, byte_count: b"\x55\x8b\xec\x90"[:byte_count],
+            get_type=lambda ea: "int __cdecl mcp_apply_e2e(void);",
+            print_type=lambda ea, flags: "fallback",
+            generate_disasm_line=lambda ea, flags: "push ebp",
+        ),
+        raising=False,
+    )
+    func = types.SimpleNamespace(start_ea=0x401000)
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_bytes",
+        types.SimpleNamespace(
+            get_cmt=lambda ea, repeatable: "repeatable comment"
+            if repeatable
+            else "regular comment"
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_funcs",
+        types.SimpleNamespace(
+            get_func=lambda ea: func if ea == 0x401000 else None,
+            get_func_cmt=lambda function, repeatable: "repeatable function comment"
+            if repeatable
+            else "function comment",
+        ),
+    )
+
+    result = ida_plugin.inspect_address_data(address="0x401000", byte_count=4)
+
+    assert result["found"] is True
+    assert result["ea"] == 0x401000
+    assert result["name"] == "mcp_apply_e2e"
+    assert result["comment"] == "regular comment"
+    assert result["repeatable_comment"] == "repeatable comment"
+    assert result["function_comment"] == "function comment"
+    assert result["repeatable_function_comment"] == "repeatable function comment"
+    assert result["bytes_hex"] == "558bec90"
+    assert result["type"] == "int __cdecl mcp_apply_e2e(void);"
+    assert result["disassembly"] == "push ebp"
+    assert result["dirty"] is True
+    assert result["database_sha256"] == "abc"
 
 
 def test_apply_changes_rename_missing_gui_api_returns_operation_error(monkeypatch):

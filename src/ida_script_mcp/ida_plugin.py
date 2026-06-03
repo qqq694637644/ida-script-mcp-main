@@ -990,6 +990,150 @@ def get_xrefs_data(
     return result
 
 
+def _none_if_empty(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
+def _inspect_name(ea: int) -> str:
+    getter = getattr(idc, "get_name", None)
+    if getter is not None:
+        for args in ((ea,), (ea, 0)):
+            try:
+                name = getter(*args)
+            except TypeError:
+                continue
+            except Exception:
+                break
+            if name:
+                return str(name)
+    return _symbol_name(ea)
+
+
+def _inspect_bytes_hex(ea: int, byte_count: int) -> str | None:
+    getter = getattr(idc, "get_bytes", None)
+    if getter is None:
+        return None
+    try:
+        data = getter(ea, byte_count)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    if isinstance(data, bytes):
+        return data.hex()
+    if isinstance(data, bytearray):
+        return bytes(data).hex()
+    try:
+        return bytes(data).hex()
+    except Exception:
+        return _none_if_empty(data)
+
+
+def _inspect_comment(ea: int, repeatable: bool) -> str | None:
+    try:
+        import ida_bytes
+    except Exception:
+        return None
+    getter = getattr(ida_bytes, "get_cmt", None)
+    if getter is None:
+        return None
+    try:
+        return _none_if_empty(getter(ea, int(repeatable)))
+    except Exception:
+        return None
+
+
+def _inspect_function_comment(ea: int, repeatable: bool) -> str | None:
+    try:
+        import ida_funcs
+    except Exception:
+        return None
+    get_func = getattr(ida_funcs, "get_func", None)
+    get_func_cmt = getattr(ida_funcs, "get_func_cmt", None)
+    if get_func is None or get_func_cmt is None:
+        return None
+    try:
+        func = get_func(ea)
+    except Exception:
+        return None
+    if func is None:
+        return None
+    try:
+        return _none_if_empty(get_func_cmt(func, int(repeatable)))
+    except Exception:
+        return None
+
+
+def _inspect_type(ea: int) -> str | None:
+    for getter_name, args in (("get_type", (ea,)), ("print_type", (ea, 0))):
+        getter = getattr(idc, getter_name, None)
+        if getter is None:
+            continue
+        try:
+            value = getter(*args)
+        except Exception:
+            continue
+        if value:
+            return str(value)
+    return None
+
+
+def _inspect_disassembly(ea: int) -> str:
+    generator = getattr(idc, "generate_disasm_line", None)
+    if generator is None:
+        return ""
+    try:
+        return str(generator(ea, 0) or "")
+    except Exception:
+        return ""
+
+
+def inspect_address_data(
+    address: str | None = None,
+    name: str | None = None,
+    byte_count: int = 16,
+) -> dict[str, Any]:
+    """Read a single address for post-apply validation without enabling /execute."""
+
+    try:
+        requested_byte_count = int(byte_count)
+    except Exception:
+        requested_byte_count = 16
+    requested_byte_count = max(1, min(64, requested_byte_count))
+
+    result = _collect_database_info()
+    result["query"] = {
+        "address": address,
+        "name": name,
+        "byte_count": requested_byte_count,
+    }
+
+    target_ea, error = _resolve_target_ea(address=address, name=name)
+    if error:
+        result.update({"found": False, "error": error})
+        return result
+
+    ea = int(target_ea)
+    result.update(
+        {
+            "found": True,
+            "ea": ea,
+            "name": _inspect_name(ea),
+            "comment": _inspect_comment(ea, repeatable=False),
+            "repeatable_comment": _inspect_comment(ea, repeatable=True),
+            "function_comment": _inspect_function_comment(ea, repeatable=False),
+            "repeatable_function_comment": _inspect_function_comment(ea, repeatable=True),
+            "bytes_hex": _inspect_bytes_hex(ea, requested_byte_count),
+            "type": _inspect_type(ea),
+            "disassembly": _inspect_disassembly(ea),
+        }
+    )
+    return result
+
+
 def _required_gui_api(module_name: str, function_name: str):
     if not HAS_IDA:
         raise RuntimeError("IDA runtime is unavailable for GUI change replay")
@@ -1024,8 +1168,12 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
             set_cmt = _required_gui_api("ida_bytes", "set_cmt")
             ok = set_cmt(operation.ea, operation.text, int(operation.repeatable))
         elif op == "function_comment":
+            get_func = _required_gui_api("ida_funcs", "get_func")
             set_func_cmt = _required_gui_api("ida_funcs", "set_func_cmt")
-            ok = set_func_cmt(operation.ea, operation.text, int(operation.repeatable))
+            func = get_func(operation.ea)
+            if func is None:
+                raise RuntimeError(f"No function found for address {hex(int(operation.ea))}")
+            ok = set_func_cmt(func, operation.text, int(operation.repeatable))
         elif op == "patch_bytes":
             patch_bytes = _required_gui_api("ida_bytes", "patch_bytes")
             ok = patch_bytes(operation.ea, bytes.fromhex(operation.new_bytes_hex))
@@ -1235,6 +1383,17 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                 self._send_json_response(200, result)
                 return
 
+            if parsed.path == "/inspect_address":
+                result = execute_on_main_thread(
+                    inspect_address_data,
+                    address=request_data.get("address"),
+                    name=request_data.get("name"),
+                    byte_count=request_data.get("byte_count", 16),
+                    write=False,
+                )
+                self._send_json_response(200, result)
+                return
+
             if parsed.path == "/decompile":
                 result = execute_on_main_thread(
                     decompile_function_data,
@@ -1338,6 +1497,9 @@ if HAS_IDA:
                         f"[{PLUGIN_NAME}] Decompile endpoint: POST http://{self.host}:{port}/decompile"
                     )
                     print(f"[{PLUGIN_NAME}] Xrefs endpoint: POST http://{self.host}:{port}/xrefs")
+                    print(
+                        f"[{PLUGIN_NAME}] Inspect address endpoint: POST http://{self.host}:{port}/inspect_address"
+                    )
                     print(
                         f"[{PLUGIN_NAME}] Execute endpoint disabled by default; "
                         "use isolated worker execution"

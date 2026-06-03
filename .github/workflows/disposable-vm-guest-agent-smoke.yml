@@ -39,6 +39,7 @@ on:
           - python_script
           - ida_plugin_install
           - ida_plugin_api_test
+          - ida_plugin_apply_changes_test
         default: noop
       ida_dir:
         description: "Guest IDA Pro directory used for IDA-related tasks"
@@ -59,6 +60,7 @@ on:
         options:
           - basic
           - full
+          - apply_changes
         default: basic
       command_json:
         description: "JSON command array used when task_action=command"
@@ -191,6 +193,18 @@ jobs:
               --dll-path $dllPath `
               --ida-timeout-seconds $idaTimeout `
               --test-mode $idaApiTestMode `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_apply_changes_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_apply_changes_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_api_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode apply_changes `
               --output $scriptPath
             $controllerArgs += @("--script-path", $scriptPath)
           }
