@@ -12,7 +12,7 @@ The current version solves that by adding a V2.3 isolated execution design and a
 
 - **Public `execute_idapython` is isolated-only.** It copies a saved clean IDB/I64 database and runs query/execution code in a separate headless IDA worker process with a hard process timeout. It does not fall back to GUI `/execute`.
 - **GUI `/execute` is disabled by default.** The plugin returns HTTP 410 for GUI execute requests unless an explicit development escape hatch is enabled.
-- **Only reviewed writes reach the GUI database.** Worker-side changes are represented as a structured `ChangeSet` and replayed through GUI `/apply_changes` or the MCP `apply_worker_changes` tool. Query code itself does not execute in the GUI database.
+- **Only reviewed writes reach the GUI database.** Worker-side changes are represented as a structured `ChangeSet` and replayed through GUI `/apply_changes` or the MCP `apply_worker_changes` tool. Arbitrary user IDAPython query code itself does not execute in the GUI database.
 - **Database identity is checked.** Replay uses a saved database SHA-256 fingerprint. Bad fingerprints are rejected.
 - **Dirty/unsaved state is fail-closed.** If the GUI database is dirty or identity is unknown, destructive apply is rejected. On IDA 8.3 where some dirty APIs are unavailable, the plugin tracks an internal mutation flag after successful apply.
 - **Dry-run is the default.** `/apply_changes` defaults to dry-run and must be explicitly called with `dry_run=false` to mutate the database.
@@ -28,9 +28,10 @@ AI client / MCP client
         v
 ida-script-mcp server
         |
-        |  safe context: ask GUI plugin for metadata, instance, saved DB path, fingerprint
+        |  structured live reads:
+        |    GUI plugin read-only endpoints (/metadata, /functions, /decompile, /xrefs)
         |
-        |  queries/custom IDAPython:
+        |  custom IDAPython queries/execution:
         |    copy saved clean IDB/I64
         |    launch headless IDA worker process
         |    enforce hard process timeout / kill process tree
@@ -43,7 +44,7 @@ ida-script-mcp server
 GUI IDA database is mutated only by explicit apply_changes replay
 ```
 
-The important boundary is: **queries run in the headless worker copy; writes are explicit GUI replays.** The live GUI IDA process provides context and applies reviewed changes, but it is not the execution sandbox for arbitrary query code.
+The important boundary is: **structured built-in reads are live read-only GUI endpoint calls; arbitrary/custom IDAPython query code runs in the headless worker copy; writes are explicit GUI replays.** The live GUI IDA process provides metadata and read-only structured analysis endpoints, and it applies reviewed changes, but it is not the execution sandbox for arbitrary query code.
 
 The disposable VM test path adds:
 
@@ -63,14 +64,14 @@ GitHub workflow_dispatch
 | Tool | Purpose | Mutates IDA? |
 | --- | --- | --- |
 | `list_ida_instances` | Discover running IDA plugin instances. | No |
-| `get_ida_database_info` | Read metadata, hashes, paths, dirty state, and instance info. | No |
-| `list_functions` | Enumerate functions with pagination and filters. | No |
-| `decompile_function` | Return Hex-Rays pseudocode and optional disassembly. | No |
-| `get_xrefs` | Return xrefs to/from an address or symbol. | No |
+| `get_ida_database_info` | Read live GUI metadata, hashes, paths, dirty state, and instance info. | No |
+| `list_functions` | Read live GUI function lists through the plugin's structured read endpoint. | No |
+| `decompile_function` | Read live GUI Hex-Rays pseudocode and optional disassembly. | No |
+| `get_xrefs` | Read live GUI xrefs to/from an address or symbol. | No |
 | `execute_idapython` | Run IDAPython queries in a headless isolated worker database copy with a hard process timeout. | Worker copy only |
 | `apply_worker_changes` | Preview or apply a worker `ChangeSet` to the GUI database. | Yes, only when `dry_run=false` |
 
-The plugin also exposes HTTP endpoints used by the MCP server and workflow tests:
+The plugin also exposes localhost HTTP endpoints used by the MCP server and workflow tests. `/metadata`, `/functions`, `/decompile`, `/xrefs`, and `/inspect_address` are live read-only GUI endpoints. `/apply_changes` is the explicit GUI write replay endpoint. `/execute` is rejected by default.
 
 ```text
 GET  /health
@@ -168,8 +169,8 @@ The default MCP transport is stdio.
 
 1. Run `list_ida_instances` when more than one IDA database may be open.
 2. Run `get_ida_database_info` before making assumptions about the active database.
-3. Use read-only tools first: `list_functions`, `decompile_function`, `get_xrefs`.
-4. Use `execute_idapython` for long-tail custom queries; it runs in a headless isolated copied database with a process-level timeout.
+3. Use structured read-only tools first: `list_functions`, `decompile_function`, `get_xrefs`. These read the live GUI database through read-only plugin endpoints.
+4. Use `execute_idapython` for long-tail custom IDAPython queries. This path runs in a headless isolated copied database with a process-level timeout.
 5. If worker changes are collected, call `apply_worker_changes` first as dry-run.
 6. Only call `apply_worker_changes` with `dry_run=false` after checking the fingerprint and confirming the GUI database is clean.
 
