@@ -13,6 +13,7 @@ from textwrap import dedent
 from .ida_plugin_install import (
     DEFAULT_GUEST_IDA_DIR,
     IDA_EXECUTABLE_CANDIDATES,
+    LEGACY_ROOT_SUPPORT_FILES,
     _read_install_files,
 )
 
@@ -45,6 +46,7 @@ def build_guest_ida_api_test_script(
         "__DLL_PATH_JSON__": json.dumps(dll_path),
         "__IDA_TIMEOUT_SECONDS_JSON__": json.dumps(ida_timeout_seconds),
         "__IDA_EXECUTABLE_CANDIDATES_JSON__": json.dumps(list(IDA_EXECUTABLE_CANDIDATES)),
+        "__LEGACY_ROOT_SUPPORT_FILES_JSON__": json.dumps(list(LEGACY_ROOT_SUPPORT_FILES)),
         "__FILES_B64_JSON__": json.dumps(files_b64, ensure_ascii=False),
         "__EXPECTED_SHA256_JSON__": json.dumps(expected_sha256, ensure_ascii=False),
     }
@@ -97,6 +99,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
     DLL_PATH = __DLL_PATH_JSON__
     IDA_TIMEOUT_SECONDS = __IDA_TIMEOUT_SECONDS_JSON__
     IDA_EXECUTABLE_CANDIDATES = __IDA_EXECUTABLE_CANDIDATES_JSON__
+    LEGACY_ROOT_SUPPORT_FILES = __LEGACY_ROOT_SUPPORT_FILES_JSON__
     FILES_B64 = __FILES_B64_JSON__
     EXPECTED_SHA256 = __EXPECTED_SHA256_JSON__
 
@@ -435,6 +438,10 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
     def _install_plugin_files() -> Path:
         plugin_dir = _ida_user_dir() / "plugins"
         plugin_dir.mkdir(parents=True, exist_ok=True)
+        for legacy_name in LEGACY_ROOT_SUPPORT_FILES:
+            legacy_path = plugin_dir / legacy_name
+            if legacy_path.exists() or legacy_path.is_symlink():
+                legacy_path.unlink()
         for destination, encoded in FILES_B64.items():
             path = plugin_dir / destination
             content = base64.b64decode(encoded.encode("ascii"))

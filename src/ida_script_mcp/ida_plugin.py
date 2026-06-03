@@ -42,33 +42,55 @@ try:  # Package import used when this module is imported from ida_script_mcp.
     from .protocol import ExecuteRequest, ExecuteResult, ExecutionError
 except ImportError:  # pragma: no cover - standalone IDA plugin support-file import.
     plugin_dir = Path(__file__).parent
+    support_dir = plugin_dir / "ida_script_mcp_support"
     if str(plugin_dir) not in sys.path:
         sys.path.insert(0, str(plugin_dir))
+    if str(support_dir) not in sys.path:
+        sys.path.insert(0, str(support_dir))
 
     try:
-        from ida_script_mcp_change_protocol import (  # type: ignore[no-redef]
+        from ida_script_mcp_support.change_protocol import (  # type: ignore[no-redef]
             ApplyChangesRequest,
             ApplyChangesResult,
             OperationApplyResult,
             fingerprint_from_metadata,
             fingerprint_matches,
         )
-        from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
-        from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+        from ida_script_mcp_support.execution import ScriptExecutor  # type: ignore[no-redef]
+        from ida_script_mcp_support.protocol import (  # type: ignore[no-redef]
             ExecuteRequest,
             ExecuteResult,
             ExecutionError,
         )
     except ImportError:
-        from change_protocol import (  # type: ignore[no-redef]
-            ApplyChangesRequest,
-            ApplyChangesResult,
-            OperationApplyResult,
-            fingerprint_from_metadata,
-            fingerprint_matches,
-        )
-        from execution import ScriptExecutor  # type: ignore[no-redef]
-        from protocol import ExecuteRequest, ExecuteResult, ExecutionError  # type: ignore[no-redef]
+        try:
+            from ida_script_mcp_change_protocol import (  # type: ignore[no-redef]
+                ApplyChangesRequest,
+                ApplyChangesResult,
+                OperationApplyResult,
+                fingerprint_from_metadata,
+                fingerprint_matches,
+            )
+            from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
+            from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+                ExecuteRequest,
+                ExecuteResult,
+                ExecutionError,
+            )
+        except ImportError:
+            from change_protocol import (  # type: ignore[no-redef]
+                ApplyChangesRequest,
+                ApplyChangesResult,
+                OperationApplyResult,
+                fingerprint_from_metadata,
+                fingerprint_matches,
+            )
+            from execution import ScriptExecutor  # type: ignore[no-redef]
+            from protocol import (  # type: ignore[no-redef]
+                ExecuteRequest,
+                ExecuteResult,
+                ExecutionError,
+            )
 
 PLUGIN_NAME = "IDA-Script-MCP"
 DEFAULT_HOST = "127.0.0.1"

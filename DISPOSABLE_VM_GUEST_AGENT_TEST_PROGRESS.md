@@ -154,6 +154,45 @@ Next action: fixed `src/ida_script_mcp/payload/ida_api_test.py` so top-level DLL
 
 Snapshot note: user reports the VMware snapshot name has been changed back to `test1`; next run should use default restore args with no `restore_extra_args_json` override.
 
+## IDA plugin support-file loading issue
+
+User-provided IDA log showed that `test1.dll` and Hex-Rays loaded, and the main
+`IDA-Script-MCP` plugin loaded, but support files in the IDA `plugins` root were
+also executed as standalone IDA plugins:
+
+```text
+ida_script_mcp_change_protocol.py: undefined function ...PLUGIN_ENTRY
+ida_script_mcp_execution.py: undefined function ...PLUGIN_ENTRY
+ida_script_mcp_protocol.py: undefined function ...PLUGIN_ENTRY
+ida_script_mcp_change_recorder.py: attempted relative import with no known parent package
+```
+
+Root cause: dynamic install placed non-plugin support `.py` files directly under
+the IDA `plugins` directory. IDA scans top-level `.py` files there as plugins.
+
+Fix implemented locally:
+
+```text
+plugins\ida_script_mcp.py                         # only top-level plugin entry
+plugins\ida_script_mcp_support\__init__.py
+plugins\ida_script_mcp_support\protocol.py
+plugins\ida_script_mcp_support\execution.py
+plugins\ida_script_mcp_support\change_protocol.py
+plugins\ida_script_mcp_support\change_recorder.py
+```
+
+The installer and dynamic payloads now remove legacy top-level support files:
+
+```text
+ida_script_mcp_protocol.py
+ida_script_mcp_execution.py
+ida_script_mcp_change_protocol.py
+ida_script_mcp_change_recorder.py
+```
+
+Next validation: rerun `task_action=ida_plugin_install`, then rerun
+`task_action=ida_plugin_api_test` only after the IDA startup log is clean.
+
 ## Update protocol
 
 After every real workflow run, append:

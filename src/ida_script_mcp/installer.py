@@ -41,12 +41,20 @@ MCP_SERVER_NAME = "ida-script-mcp"
 PLUGIN_NAME = "ida_script_mcp"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 IDA_PLUGIN_FILE = os.path.join(SCRIPT_DIR, "ida_plugin.py")
+SUPPORT_PACKAGE_DIR = "ida_script_mcp_support"
+SUPPORT_PACKAGE_INIT_CONTENT = '"""Support modules for the IDA Script MCP plugin."""\n'
 IDA_PLUGIN_SUPPORT_FILES = {
-    "protocol.py": "ida_script_mcp_protocol.py",
-    "execution.py": "ida_script_mcp_execution.py",
-    "change_protocol.py": "ida_script_mcp_change_protocol.py",
-    "change_recorder.py": "ida_script_mcp_change_recorder.py",
+    "protocol.py": os.path.join(SUPPORT_PACKAGE_DIR, "protocol.py"),
+    "execution.py": os.path.join(SUPPORT_PACKAGE_DIR, "execution.py"),
+    "change_protocol.py": os.path.join(SUPPORT_PACKAGE_DIR, "change_protocol.py"),
+    "change_recorder.py": os.path.join(SUPPORT_PACKAGE_DIR, "change_recorder.py"),
 }
+LEGACY_ROOT_SUPPORT_FILES = (
+    "ida_script_mcp_protocol.py",
+    "ida_script_mcp_execution.py",
+    "ida_script_mcp_change_protocol.py",
+    "ida_script_mcp_change_recorder.py",
+)
 SERVER_MODULE = "ida_script_mcp.server"
 
 
@@ -87,10 +95,24 @@ def _install_link_or_copy(source: str, destination: str) -> bool:
         return False
 
     _remove_path(destination)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
     try:
         os.symlink(source, destination)
     except OSError:
         shutil.copy(source, destination)
+    return True
+
+
+def _install_text(destination: str, content: str) -> bool:
+    """Install a small generated text file."""
+    if os.path.exists(destination):
+        with open(destination, encoding="utf-8") as existing:
+            if existing.read() == content:
+                return False
+    _remove_path(destination)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with open(destination, "w", encoding="utf-8", newline="\n") as output:
+        output.write(content)
     return True
 
 
@@ -111,14 +133,26 @@ def install_ida_plugin(*, uninstall: bool = False, quiet: bool = False) -> bool:
 
     ida_plugin_folder = os.path.join(ida_folder, "plugins")
     plugin_destination = os.path.join(ida_plugin_folder, f"{PLUGIN_NAME}.py")
+    support_package_destination = os.path.join(ida_plugin_folder, SUPPORT_PACKAGE_DIR)
+    support_init_destination = os.path.join(support_package_destination, "__init__.py")
     support_destinations = [
         os.path.join(ida_plugin_folder, destination)
         for destination in IDA_PLUGIN_SUPPORT_FILES.values()
     ]
+    legacy_support_destinations = [
+        os.path.join(ida_plugin_folder, destination) for destination in LEGACY_ROOT_SUPPORT_FILES
+    ]
 
     if uninstall:
         removed_paths = [
-            path for path in [plugin_destination, *support_destinations] if os.path.lexists(path)
+            path
+            for path in [
+                plugin_destination,
+                support_package_destination,
+                *support_destinations,
+                *legacy_support_destinations,
+            ]
+            if os.path.lexists(path)
         ]
         for path in removed_paths:
             _remove_path(path)
@@ -148,12 +182,16 @@ def install_ida_plugin(*, uninstall: bool = False, quiet: bool = False) -> bool:
         return False
 
     os.makedirs(ida_plugin_folder, exist_ok=True)
+    for legacy_path in legacy_support_destinations:
+        _remove_path(legacy_path)
 
     changed_paths = [
         destination
         for source, destination in install_files
         if _install_link_or_copy(source, destination)
     ]
+    if _install_text(support_init_destination, SUPPORT_PACKAGE_INIT_CONTENT):
+        changed_paths.append(support_init_destination)
 
     if changed_paths:
         if not quiet:

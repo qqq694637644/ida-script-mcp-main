@@ -7,6 +7,7 @@ import sys
 
 from ida_script_mcp.payload.ida_plugin_install import (
     DEFAULT_GUEST_IDA_DIR,
+    LEGACY_ROOT_SUPPORT_FILES,
     PLUGIN_INSTALL_FILES,
     build_guest_ida_plugin_install_script,
 )
@@ -47,6 +48,9 @@ def test_guest_ida_plugin_install_script_installs_and_verifies(tmp_path) -> None
     plugins_dir = appdata / "Hex-Rays" / "IDA Pro" / "plugins"
     for destination in PLUGIN_INSTALL_FILES.values():
         assert (plugins_dir / destination).is_file()
+    assert (plugins_dir / "ida_script_mcp_support" / "__init__.py").is_file()
+    for legacy_name in LEGACY_ROOT_SUPPORT_FILES:
+        assert not (plugins_dir / legacy_name).exists()
 
     manifest_path = plugins_dir / "ida_script_mcp_install_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -54,5 +58,7 @@ def test_guest_ida_plugin_install_script_installs_and_verifies(tmp_path) -> None
     assert manifest["ida_dir"] == str(ida_dir)
     assert manifest["plugin_name"] == "IDA-Script-MCP"
     assert manifest["plugin_has_ida_runtime"] is False
+    assert "ida_script_mcp_support.protocol" in manifest["imported_support"]
+    assert "ida_script_mcp_support.change_recorder" in manifest["imported_support"]
     assert str(ida_dir / "ida64.exe") in manifest["ida_executables"]
     assert "IDA_PLUGIN_INSTALL_VERIFY_RESULT=" in result.stdout

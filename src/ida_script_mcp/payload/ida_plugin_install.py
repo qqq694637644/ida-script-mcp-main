@@ -12,11 +12,18 @@ from textwrap import dedent
 DEFAULT_GUEST_IDA_DIR = r"C:\Users\alion\Desktop\IDAPro8.3"
 PLUGIN_INSTALL_FILES = {
     "ida_plugin.py": "ida_script_mcp.py",
-    "protocol.py": "ida_script_mcp_protocol.py",
-    "execution.py": "ida_script_mcp_execution.py",
-    "change_protocol.py": "ida_script_mcp_change_protocol.py",
-    "change_recorder.py": "ida_script_mcp_change_recorder.py",
+    "protocol.py": "ida_script_mcp_support/protocol.py",
+    "execution.py": "ida_script_mcp_support/execution.py",
+    "change_protocol.py": "ida_script_mcp_support/change_protocol.py",
+    "change_recorder.py": "ida_script_mcp_support/change_recorder.py",
 }
+SUPPORT_PACKAGE_INIT = b'"""Support modules for the IDA Script MCP plugin."""\n'
+LEGACY_ROOT_SUPPORT_FILES = (
+    "ida_script_mcp_protocol.py",
+    "ida_script_mcp_execution.py",
+    "ida_script_mcp_change_protocol.py",
+    "ida_script_mcp_change_recorder.py",
+)
 IDA_EXECUTABLE_CANDIDATES = ("ida.exe", "ida64.exe", "idat.exe", "idat64.exe")
 
 
@@ -38,6 +45,7 @@ def _read_install_files(source_root: Path | None = None) -> dict[str, bytes]:
         payload[destination_name] = source_path.read_bytes()
     if missing:
         raise FileNotFoundError("Missing IDA plugin install source files: " + ", ".join(missing))
+    payload["ida_script_mcp_support/__init__.py"] = SUPPORT_PACKAGE_INIT
     return payload
 
 
@@ -74,6 +82,7 @@ def build_guest_ida_plugin_install_script(
 
         IDA_DIR = {ida_dir!r}
         IDA_EXECUTABLE_CANDIDATES = {list(IDA_EXECUTABLE_CANDIDATES)!r}
+        LEGACY_ROOT_SUPPORT_FILES = {list(LEGACY_ROOT_SUPPORT_FILES)!r}
         FILES_B64 = {json.dumps(files_b64, ensure_ascii=False, indent=2)!r}
         EXPECTED_SHA256 = {json.dumps(expected_sha256, ensure_ascii=False, indent=2)!r}
 
@@ -134,6 +143,10 @@ def build_guest_ida_plugin_install_script(
             ida_user_dir = _ida_user_dir()
             plugin_dir = ida_user_dir / "plugins"
             plugin_dir.mkdir(parents=True, exist_ok=True)
+            for legacy_name in LEGACY_ROOT_SUPPORT_FILES:
+                legacy_path = plugin_dir / legacy_name
+                if legacy_path.exists() or legacy_path.is_symlink():
+                    legacy_path.unlink()
 
             installed: dict[str, dict[str, object]] = {{}}
             for destination, encoded in files_b64.items():
@@ -151,9 +164,10 @@ def build_guest_ida_plugin_install_script(
                 }}
 
             support_modules = [
-                "ida_script_mcp_protocol",
-                "ida_script_mcp_execution",
-                "ida_script_mcp_change_protocol",
+                "ida_script_mcp_support.protocol",
+                "ida_script_mcp_support.execution",
+                "ida_script_mcp_support.change_protocol",
+                "ida_script_mcp_support.change_recorder",
             ]
             sys.path.insert(0, str(plugin_dir))
             imported_support = []
