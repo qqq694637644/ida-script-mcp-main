@@ -160,7 +160,7 @@ The workflow exposes phase-3 script payload support through these inputs:
 
 ```text
 task_action=python_script
-script_text=import platform; print(f"phase3 script ok python={platform.python_version()}")
+script_text=import platform; print("phase3 script ok python=" + platform.python_version())
 ```
 
 ## Host result files

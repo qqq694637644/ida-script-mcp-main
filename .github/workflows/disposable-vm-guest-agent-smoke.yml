@@ -36,7 +36,7 @@ on:
       script_text:
         description: "UTF-8 Python script used when task_action=python_script"
         required: false
-        default: 'import platform, sys; print(f"phase3 script ok python={platform.python_version()} executable={sys.executable}")'
+        default: 'import platform, sys; print("phase3 script ok python=" + platform.python_version() + " executable=" + sys.executable)'
       connect_timeout_seconds:
         description: "Seconds to wait for guest /hello"
         required: true
@@ -93,7 +93,7 @@ jobs:
 ${{ inputs.script_text }}
 '@
           if ([string]::IsNullOrWhiteSpace($scriptText)) {
-            $scriptText = 'import platform, sys; print(f"phase3 script ok python={platform.python_version()} executable={sys.executable}")'
+            $scriptText = 'import platform, sys; print("phase3 script ok python=" + platform.python_version() + " executable=" + sys.executable)'
           }
           $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
           if ([string]::IsNullOrWhiteSpace($connectTimeout)) { $connectTimeout = "600" }

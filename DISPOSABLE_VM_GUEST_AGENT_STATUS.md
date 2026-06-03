@@ -198,7 +198,7 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 
 ```text
 task_action=python_script
-script_text=import platform, sys; print(f"phase3 script ok python={platform.python_version()} executable={sys.executable}")
+script_text=import platform, sys; print("phase3 script ok python=" + platform.python_version() + " executable=" + sys.executable)
 controller_url=http://192.168.1.249:8766
 ```
 
