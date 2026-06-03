@@ -193,6 +193,38 @@ ida_script_mcp_change_recorder.py
 Next validation: rerun `task_action=ida_plugin_install`, then rerun
 `task_action=ida_plugin_api_test` only after the IDA startup log is clean.
 
+## IDA API harness redesign
+
+User manually confirmed `test1.dll` analysis is fast and the plugin starts HTTP
+server quickly when IDA is opened manually. The hang risk is therefore not DLL
+analysis; it is the old test harness running HTTP client code from inside the
+same IDA process that also hosts the plugin server.
+
+New harness design implemented locally:
+
+```text
+guest payload starts IDA with -S bootstrap.py
+bootstrap.py only runs ida_auto.auto_wait(), loads/starts plugin, writes ida_ready.json
+guest payload waits for ida_ready.json with a short ready timeout
+guest payload, outside the IDA process, calls HTTP endpoints on 127.0.0.1
+guest payload writes stage heartbeats to heartbeat.ndjson and stdout
+guest payload terminates/taskkills IDA in finally block
+default mode=basic, timeout=180 seconds
+```
+
+Basic mode currently covers:
+
+```text
+/health
+/metadata
+/functions
+/functions limit=1
+optional /functions name filter
+```
+
+Full mode keeps the existing heavier checks for `/decompile`, `/xrefs`, rejected
+`/execute`, and 404 behavior, but should only run after basic mode is stable.
+
 ## Update protocol
 
 After every real workflow run, append:

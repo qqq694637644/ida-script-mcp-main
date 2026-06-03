@@ -51,7 +51,15 @@ on:
       ida_timeout_seconds:
         description: "Seconds to wait for IDA API automation payload"
         required: false
-        default: "900"
+        default: "180"
+      ida_api_test_mode:
+        description: "IDA API test mode used when task_action=ida_plugin_api_test"
+        required: false
+        type: choice
+        options:
+          - basic
+          - full
+        default: basic
       command_json:
         description: "JSON command array used when task_action=command"
         required: false
@@ -121,7 +129,9 @@ jobs:
           $dllPath = "${{ inputs.dll_path }}"
           if ([string]::IsNullOrWhiteSpace($dllPath)) { $dllPath = "C:\Users\alion\Desktop\test1.dll" }
           $idaTimeout = "${{ inputs.ida_timeout_seconds }}"
-          if ([string]::IsNullOrWhiteSpace($idaTimeout)) { $idaTimeout = "900" }
+          if ([string]::IsNullOrWhiteSpace($idaTimeout)) { $idaTimeout = "180" }
+          $idaApiTestMode = "${{ inputs.ida_api_test_mode }}"
+          if ([string]::IsNullOrWhiteSpace($idaApiTestMode)) { $idaApiTestMode = "basic" }
           $commandJson = '${{ inputs.command_json }}'
           if ([string]::IsNullOrWhiteSpace($commandJson)) { $commandJson = '["python", "--version"]' }
           $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
@@ -180,6 +190,7 @@ jobs:
               --ida-dir $idaDir `
               --dll-path $dllPath `
               --ida-timeout-seconds $idaTimeout `
+              --test-mode $idaApiTestMode `
               --output $scriptPath
             $controllerArgs += @("--script-path", $scriptPath)
           }

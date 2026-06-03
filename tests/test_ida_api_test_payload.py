@@ -5,6 +5,8 @@ from pathlib import Path
 from ida_script_mcp.payload.ida_api_test import (
     DEFAULT_GUEST_DLL_PATH,
     DEFAULT_GUEST_IDA_DIR,
+    DEFAULT_IDA_API_TEST_MODE,
+    DEFAULT_IDA_TIMEOUT_SECONDS,
     build_guest_ida_api_test_script,
 )
 
@@ -17,11 +19,21 @@ def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None
 
     assert "IDAPro8.3" in script
     assert "test1.dll" in script
+    assert f"IDA_TIMEOUT_SECONDS = {DEFAULT_IDA_TIMEOUT_SECONDS}" in script
+    assert f'IDA_API_TEST_MODE = "{DEFAULT_IDA_API_TEST_MODE}"' in script
     assert "IDA_PLUGIN_API_TEST_RESULT=" in script
+    assert "IDA_API_STAGE=" in script
+    assert "ida_ready.json" in script
+    assert "ida_ready_wait_start" in script
+    assert "_run_external_api_tests" in script
+    assert "threading.Thread" not in script
+    assert "_run_http_tests" not in script
     assert "__DLL_PATH_JSON__" not in script
-    assert "DLL_PATH = __BOOTSTRAP_DLL_PATH_JSON__" not in script
+    outer_script = script.split("BOOTSTRAP_TEMPLATE", maxsplit=1)[0]
+    assert "DLL_PATH = __BOOTSTRAP_DLL_PATH_JSON__" not in outer_script
     assert "__IDA_DIR_JSON__" not in script
     assert "__IDA_TIMEOUT_SECONDS_JSON__" not in script
+    assert "__IDA_API_TEST_MODE_JSON__" not in script
     assert '"/metadata"' in script
     assert '"/functions"' in script
     assert '"/decompile"' in script
@@ -38,11 +50,13 @@ def test_build_guest_ida_api_test_script_accepts_custom_paths(tmp_path) -> None:
         ida_dir=str(ida_dir),
         dll_path=str(dll_path),
         ida_timeout_seconds=123,
+        test_mode="full",
     )
 
     assert "IDA Pro Custom" in script
     assert "sample.dll" in script
     assert "IDA_TIMEOUT_SECONDS = 123" in script
+    assert 'IDA_API_TEST_MODE = "full"' in script
     compile(script, "<generated_ida_api_test_payload>", "exec")
 
 
