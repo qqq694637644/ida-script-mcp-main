@@ -1,12 +1,17 @@
 name: Disposable VM guest agent smoke
 
 on:
+  push:
+    branches:
+      - gpt/execute-subsystem-20260602-1dc47a
+    paths:
+      - ".github/workflows/disposable-vm-guest-agent-smoke.yml"
   workflow_dispatch:
     inputs:
       controller_url:
-        description: "URL guest can use to reach the host controller; empty = auto-detect first VMware IPv4"
+        description: "URL guest can use to reach the host controller"
         required: false
-        default: ""
+        default: "http://192.168.1.249:8766"
       port:
         description: "Host controller listen port"
         required: true
@@ -63,30 +68,39 @@ jobs:
           $resultDir = Join-Path $env:RUNNER_TEMP "ida-script-mcp-disposable-vm"
           New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
 
+          $port = "${{ inputs.port }}"
+          if ([string]::IsNullOrWhiteSpace($port)) { $port = "8766" }
+
           $controllerUrl = "${{ inputs.controller_url }}"
           if ([string]::IsNullOrWhiteSpace($controllerUrl)) {
-            $vmwareIp = Get-NetIPAddress -AddressFamily IPv4 |
-              Where-Object { $_.InterfaceAlias -like "*VMware*" -and $_.IPAddress -notlike "169.254.*" } |
-              Sort-Object InterfaceAlias |
-              Select-Object -First 1
-            if ($null -eq $vmwareIp) {
-              throw "controller_url was empty and no VMware IPv4 address was found on HostMachine."
-            }
-            $controllerUrl = "http://$($vmwareIp.IPAddress):${{ inputs.port }}"
+            $controllerUrl = "http://192.168.1.249:$port"
           }
           Write-Host "Using controller_url=$controllerUrl"
 
+          $restoreScript = "${{ inputs.restore_script }}"
+          if ([string]::IsNullOrWhiteSpace($restoreScript)) {
+            $restoreScript = "C:\Users\alion\Scripts\vmware_restore_test1.py"
+          }
+          $taskAction = "${{ inputs.task_action }}"
+          if ([string]::IsNullOrWhiteSpace($taskAction)) { $taskAction = "noop" }
+          $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
+          if ([string]::IsNullOrWhiteSpace($connectTimeout)) { $connectTimeout = "600" }
+          $runTimeout = "${{ inputs.run_timeout_seconds }}"
+          if ([string]::IsNullOrWhiteSpace($runTimeout)) { $runTimeout = "1800" }
+          $restoreGui = "${{ inputs.restore_gui }}"
+          if ([string]::IsNullOrWhiteSpace($restoreGui)) { $restoreGui = "true" }
+
           $controllerArgs = @(
             "--bind-host", "0.0.0.0",
-            "--port", "${{ inputs.port }}",
+            "--port", $port,
             "--advertise-url", $controllerUrl,
-            "--task-action", "${{ inputs.task_action }}",
-            "--connect-timeout-seconds", "${{ inputs.connect_timeout_seconds }}",
-            "--timeout-seconds", "${{ inputs.run_timeout_seconds }}",
+            "--task-action", $taskAction,
+            "--connect-timeout-seconds", $connectTimeout,
+            "--timeout-seconds", $runTimeout,
             "--result-dir", $resultDir,
-            "--vmware-restore-script", "${{ inputs.restore_script }}"
+            "--vmware-restore-script", $restoreScript
           )
-          if ("${{ inputs.restore_gui }}" -eq "true") {
+          if ($restoreGui -eq "true") {
             $controllerArgs += "--vmware-restore-arg=--gui"
           }
 
