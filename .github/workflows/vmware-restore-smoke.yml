@@ -36,15 +36,15 @@ jobs:
           echo python_version_exit=%ERRORLEVEL%
           py -3 --version
           echo py_version_exit=%ERRORLEVEL%
-          where python >nul 2>nul
-          if errorlevel 1 goto try_py
-          python vmware_restore_test1.py --gui
-          exit /b %ERRORLEVEL%
-          :try_py
           where py >nul 2>nul
-          if errorlevel 1 goto no_python
+          if errorlevel 1 goto try_python
           py -3 vmware_restore_test1.py --gui
           exit /b %ERRORLEVEL%
+          :try_python
+          python --version >nul 2>nul
+          if errorlevel 1 goto no_python
+          python vmware_restore_test1.py --gui
+          exit /b %ERRORLEVEL%
           :no_python
-          echo Neither python nor py is available to the HostMachine service environment.
+          echo Neither working py nor working python is available to the HostMachine service environment.
           exit /b 9009
