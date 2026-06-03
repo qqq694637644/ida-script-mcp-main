@@ -238,6 +238,23 @@ Failure: external harness called _stage() before HEARTBEAT_PATH was initialized,
 Next action: initialize WORK_DIR/READY_PATH/HEARTBEAT_PATH/RESULT_PATH/IDA_LOG_PATH at module load time and add a generated-payload execution test for missing IDA directory to ensure stage logging works before IDA launch.
 ```
 
+### Run 26908653405 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26908653405
+Commit: f5e7c7b047059902321a6ed00f9d1a21f3930b76
+Inputs: task_action=ida_plugin_api_test, ida_api_test_mode=basic, ida_timeout_seconds=180, run_timeout_seconds=300
+Conclusion: success
+Artifact ID: 7394957954
+Result summary: external harness succeeded in 5.219 seconds. IDA ready file was written, HTTP tests ran outside IDA, and IDA was terminated in cleanup.
+Verified endpoints: /health, /metadata, /functions, /functions limit=1, /functions name filter.
+Verified DLL: C:\Users\alion\Desktop\test1.dll
+Verified plugin port: 13338
+Verified instance: 8128_test1.dll
+IDA log note: no legacy top-level support-file PLUGIN_ENTRY or relative-import errors were observed. Third-party Patching plugin action registration warnings remain unrelated.
+Next action: run ida_plugin_api_test with ida_api_test_mode=full to cover /decompile, /xrefs, rejected /execute, and 404 behavior.
+```
+
 ## Update protocol
 
 After every real workflow run, append:
