@@ -1,0 +1,30 @@
+name: VMware restore smoke
+
+on:
+  push:
+    branches:
+      - gpt/execute-subsystem-20260602-1dc47a
+    paths:
+      - ".github/workflows/vmware-restore-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vmware-restore:
+    name: Run host VMware restore script
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+
+    steps:
+      - name: Run host snapshot restore script
+        shell: cmd
+        run: |
+          echo RUNNER_NAME=%RUNNER_NAME%
+          echo COMPUTERNAME=%COMPUTERNAME%
+          whoami
+          if not "%RUNNER_NAME%"=="HostMachine" exit /b 1
+          cd /d C:\Users\alion\Scripts || exit /b 1
+          if not exist vmware_restore_test1.py exit /b 1
+          python vmware_restore_test1.py --gui
