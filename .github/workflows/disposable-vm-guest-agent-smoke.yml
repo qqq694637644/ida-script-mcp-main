@@ -29,11 +29,20 @@ on:
           - command
           - python_script
           - ida_plugin_install
+          - ida_plugin_api_test
         default: noop
       ida_dir:
-        description: "Guest IDA Pro directory used when task_action=ida_plugin_install"
+        description: "Guest IDA Pro directory used for IDA-related tasks"
         required: false
         default: "C:\\Users\\alion\\Desktop\\IDAPro8.3"
+      dll_path:
+        description: "Guest DLL path used when task_action=ida_plugin_api_test"
+        required: false
+        default: "C:\\Users\\alion\\Desktop\\test1.dll"
+      ida_timeout_seconds:
+        description: "Seconds to wait for IDA API automation payload"
+        required: false
+        default: "900"
       command_json:
         description: "JSON command array used when task_action=command"
         required: false
@@ -91,6 +100,10 @@ jobs:
           $controllerTaskAction = $taskAction
           $idaDir = "${{ inputs.ida_dir }}"
           if ([string]::IsNullOrWhiteSpace($idaDir)) { $idaDir = "C:\Users\alion\Desktop\IDAPro8.3" }
+          $dllPath = "${{ inputs.dll_path }}"
+          if ([string]::IsNullOrWhiteSpace($dllPath)) { $dllPath = "C:\Users\alion\Desktop\test1.dll" }
+          $idaTimeout = "${{ inputs.ida_timeout_seconds }}"
+          if ([string]::IsNullOrWhiteSpace($idaTimeout)) { $idaTimeout = "900" }
           $commandJson = '${{ inputs.command_json }}'
           if ([string]::IsNullOrWhiteSpace($commandJson)) { $commandJson = '["python", "--version"]' }
           $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
@@ -130,6 +143,17 @@ jobs:
             $controllerArgs[7] = $controllerTaskAction
             $scriptPath = Join-Path $resultDir "ida_plugin_install_payload.py"
             py -3 -m ida_script_mcp.payload.ida_plugin_install --ida-dir $idaDir --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_api_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_api_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_api_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
             $controllerArgs += @("--script-path", $scriptPath)
           }
 

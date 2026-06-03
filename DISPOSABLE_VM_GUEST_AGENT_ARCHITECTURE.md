@@ -399,6 +399,43 @@ Verified run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/2
 Verified result: status=installed, exit_code=0, plugin files installed under per-user IDA plugins directory.
 ```
 
+### Phase 4b: IDA DLL/plugin API smoke
+
+Goal: host dynamically sends a guest payload that opens a real DLL in IDA,
+waits for analysis, starts the installed plugin, and tests actual HTTP APIs.
+
+Inputs:
+
+```text
+task_action=ida_plugin_api_test
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Acceptance:
+
+```text
+guest validates IDA directory and DLL path
+guest installs current plugin files
+guest starts IDA with the DLL and waits for ida_auto.auto_wait()
+guest starts the IDA-Script-MCP HTTP server
+guest tests /health, /metadata, /functions, /decompile, /xrefs
+guest verifies GUI /execute is rejected by default
+guest verifies unknown routes return 404
+guest writes structured IDA_PLUGIN_API_TEST_RESULT
+guest exits with exit_code=0 only when all checks pass
+```
+
+Implementation status:
+
+```text
+Implemented in host payload builder and disposable VM workflow.
+Workflow input: task_action=ida_plugin_api_test
+Workflow inputs: ida_dir, dll_path, ida_timeout_seconds
+Verification status: pending workflow_dispatch run.
+Detailed progress: DISPOSABLE_VM_GUEST_AGENT_TEST_PROGRESS.md
+```
+
 ## 12. Current verified foundation
 
 Already verified on the current branch:

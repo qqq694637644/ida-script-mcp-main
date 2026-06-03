@@ -209,6 +209,22 @@ files into the per-user IDA plugins directory, compiles and hash-checks the
 installed files, performs standalone import validation, and writes
 `ida_script_mcp_install_manifest.json`.
 
+`ida_plugin_api_test` opens a real DLL in IDA and tests the installed plugin's
+actual HTTP endpoints from inside the disposable guest VM.
+
+```text
+task_action=ida_plugin_api_test
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+The host builds a standalone guest payload from the current repository. The
+guest installs the current plugin files, starts IDA with the DLL and an
+IDAPython bootstrap, waits for `ida_auto.auto_wait()`, starts the plugin HTTP
+server, and tests `/health`, `/metadata`, `/functions`, `/decompile`, `/xrefs`,
+GUI `/execute` rejection, and 404 behavior. Detailed run-by-run progress is
+tracked in `DISPOSABLE_VM_GUEST_AGENT_TEST_PROGRESS.md`.
+
 ## Host result files
 
 The host controller writes these files under `--result-dir`:
