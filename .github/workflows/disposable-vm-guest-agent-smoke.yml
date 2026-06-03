@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       controller_url:
-        description: "URL guest can use to reach the host controller"
-        required: true
+        description: "URL guest can use to reach the host controller; empty = auto-detect first VMware IPv4"
+        required: false
+        default: ""
       port:
         description: "Host controller listen port"
         required: true
@@ -62,10 +63,23 @@ jobs:
           $resultDir = Join-Path $env:RUNNER_TEMP "ida-script-mcp-disposable-vm"
           New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
 
+          $controllerUrl = "${{ inputs.controller_url }}"
+          if ([string]::IsNullOrWhiteSpace($controllerUrl)) {
+            $vmwareIp = Get-NetIPAddress -AddressFamily IPv4 |
+              Where-Object { $_.InterfaceAlias -like "*VMware*" -and $_.IPAddress -notlike "169.254.*" } |
+              Sort-Object InterfaceAlias |
+              Select-Object -First 1
+            if ($null -eq $vmwareIp) {
+              throw "controller_url was empty and no VMware IPv4 address was found on HostMachine."
+            }
+            $controllerUrl = "http://$($vmwareIp.IPAddress):${{ inputs.port }}"
+          }
+          Write-Host "Using controller_url=$controllerUrl"
+
           $controllerArgs = @(
             "--bind-host", "0.0.0.0",
             "--port", "${{ inputs.port }}",
-            "--advertise-url", "${{ inputs.controller_url }}",
+            "--advertise-url", $controllerUrl,
             "--task-action", "${{ inputs.task_action }}",
             "--connect-timeout-seconds", "${{ inputs.connect_timeout_seconds }}",
             "--timeout-seconds", "${{ inputs.run_timeout_seconds }}",
