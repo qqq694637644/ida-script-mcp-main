@@ -83,6 +83,93 @@ def test_collect_database_info_marks_database_hash_failure_unknown(monkeypatch, 
     assert "failed to compute SHA-256" in info["database_identity_error"]
 
 
+def test_database_dirty_state_falls_back_to_change_count_baseline(monkeypatch):
+    state = {"change_count": 7}
+    fake_idaapi = types.SimpleNamespace(
+        get_inf_structure=lambda: types.SimpleNamespace(
+            database_change_count=state["change_count"]
+        )
+    )
+    monkeypatch.delitem(sys.modules, "ida_ida", raising=False)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(ida_plugin, "idaapi", fake_idaapi, raising=False)
+    monkeypatch.setattr(ida_plugin, "DATABASE_CHANGE_COUNT_BASELINE", 7)
+    monkeypatch.setattr(ida_plugin, "DATABASE_CHANGE_COUNT_BASELINE_ERROR", None)
+
+    assert ida_plugin._database_dirty_state() == (False, None)
+
+    state["change_count"] = 8
+
+    assert ida_plugin._database_dirty_state() == (True, None)
+
+
+def test_database_dirty_state_unknown_without_change_count_baseline(monkeypatch):
+    fake_idaapi = types.SimpleNamespace(
+        get_inf_structure=lambda: types.SimpleNamespace(database_change_count=7)
+    )
+    monkeypatch.delitem(sys.modules, "ida_ida", raising=False)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(ida_plugin, "idaapi", fake_idaapi, raising=False)
+    monkeypatch.setattr(ida_plugin, "DATABASE_CHANGE_COUNT_BASELINE", None)
+    monkeypatch.setattr(ida_plugin, "DATABASE_CHANGE_COUNT_BASELINE_ERROR", None)
+
+    dirty, error = ida_plugin._database_dirty_state()
+
+    assert dirty is None
+    assert "baseline is unavailable" in str(error)
+
+
+def test_initialize_database_change_baseline_prefers_ida_ida(monkeypatch):
+    fake_ida_ida = types.SimpleNamespace(inf_get_database_change_count=lambda: 42)
+    monkeypatch.setitem(sys.modules, "ida_ida", fake_ida_ida)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(ida_plugin, "idaapi", types.SimpleNamespace(), raising=False)
+
+    baseline = ida_plugin._initialize_database_change_baseline()
+
+    assert baseline == {"database_change_baseline": 42, "database_change_baseline_error": None}
+    assert ida_plugin.DATABASE_CHANGE_COUNT_BASELINE == 42
+    assert ida_plugin.DATABASE_CHANGE_COUNT_BASELINE_ERROR is None
+
+
+def test_collect_database_info_uses_change_count_dirty_fallback(monkeypatch, tmp_path):
+    saved_db = tmp_path / "sample.i64"
+    saved_db.write_bytes(b"ida database")
+    state = {"change_count": 10}
+    fake_idaapi = types.SimpleNamespace(
+        PATH_TYPE_IDB=1,
+        get_path=lambda _path_type: str(saved_db),
+        get_input_file_path=lambda: "input.exe",
+        get_root_filename=lambda: "sample.exe",
+        get_imagebase=lambda: 0x400000,
+        get_inf_structure=lambda: types.SimpleNamespace(
+            database_change_count=state["change_count"]
+        ),
+    )
+    monkeypatch.delitem(sys.modules, "ida_ida", raising=False)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    monkeypatch.setattr(ida_plugin, "idaapi", fake_idaapi, raising=False)
+    monkeypatch.setattr(ida_plugin, "DATABASE_CHANGE_COUNT_BASELINE", 10)
+    monkeypatch.setattr(ida_plugin, "DATABASE_CHANGE_COUNT_BASELINE_ERROR", None)
+
+    clean_info = ida_plugin._collect_database_info()
+
+    assert clean_info["dirty"] is False
+    assert clean_info["dirty_state_known"] is True
+    assert clean_info["dirty_state_method"] == "database_change_count_baseline"
+    assert clean_info["database_change_count"] == 10
+    assert clean_info["database_change_baseline"] == 10
+    assert clean_info["database_sha256"]
+
+    state["change_count"] = 11
+
+    dirty_info = ida_plugin._collect_database_info()
+
+    assert dirty_info["dirty"] is True
+    assert dirty_info["unsaved"] is True
+    assert dirty_info["database_change_count"] == 11
+
+
 def _apply_payload(
     database_sha256: str = "abc",
     *,

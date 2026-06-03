@@ -38,6 +38,7 @@ def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None
     assert "__IDA_DIR_JSON__" not in script
     assert "__IDA_TIMEOUT_SECONDS_JSON__" not in script
     assert "__IDA_API_TEST_MODE_JSON__" not in script
+    assert "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__" not in outer_script
     assert '"/metadata"' in script
     assert '"/functions"' in script
     assert '"/decompile"' in script
@@ -73,8 +74,12 @@ def test_build_guest_ida_api_test_script_accepts_apply_changes_mode() -> None:
     assert 'IDA_API_TEST_MODE = "apply_changes"' in script
     assert '"/apply_changes"' in script
     assert '"/inspect_address"' in script
+    assert "database_save_start" in script
+    assert "database_save_done" in script
     assert "apply_changes_tests_start" in script
     assert "__IDA_API_TEST_MODE_JSON__" not in script
+    outer_script = script.split("BOOTSTRAP_TEMPLATE", maxsplit=1)[0]
+    assert "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__" not in outer_script
     compile(script, "<generated_ida_api_test_payload_apply_changes>", "exec")
 
 

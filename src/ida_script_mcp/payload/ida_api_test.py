@@ -134,6 +134,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
     HEARTBEAT_PATH = __HEARTBEAT_PATH_JSON__
     PLUGIN_DIR = __PLUGIN_DIR_JSON__
     DLL_PATH = __BOOTSTRAP_DLL_PATH_JSON__
+    IDA_API_TEST_MODE = __BOOTSTRAP_IDA_API_TEST_MODE_JSON__
 
 
     def _write_json(path, payload):
@@ -153,15 +154,72 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             output.write("\n")
 
 
+    def _ida_database_path(idaapi_module, ida_loader_module):
+        for module in (ida_loader_module, idaapi_module):
+            path_type = getattr(module, "PATH_TYPE_IDB", None)
+            getter = getattr(module, "get_path", None)
+            if path_type is None or getter is None:
+                continue
+            try:
+                path = getter(path_type)
+            except Exception:
+                continue
+            if path:
+                return str(path)
+        return ""
+
+
+    def _save_database_for_apply_changes(idaapi_module, ida_loader_module):
+        database_path = _ida_database_path(idaapi_module, ida_loader_module)
+        if not database_path:
+            raise RuntimeError("Cannot resolve saved IDB/I64 path before apply_changes test")
+
+        _stage("database_save_start", {"database_path": database_path})
+        saver = getattr(ida_loader_module, "save_database", None)
+        if saver is None:
+            saver = getattr(idaapi_module, "save_database", None)
+        if saver is None:
+            raise RuntimeError("IDA save_database API is unavailable")
+
+        try:
+            saved = saver(database_path, 0)
+        except TypeError:
+            saved = saver(database_path)
+        if saved is False:
+            raise RuntimeError(f"IDA save_database returned failure for {database_path}")
+
+        flusher = getattr(ida_loader_module, "flush_buffers", None)
+        if flusher is None:
+            flusher = getattr(idaapi_module, "flush_buffers", None)
+        if flusher is not None:
+            try:
+                flusher()
+            except Exception:
+                pass
+
+        path = Path(database_path)
+        if not path.is_file():
+            raise RuntimeError(f"Saved IDB/I64 path does not exist after save: {database_path}")
+        size = path.stat().st_size
+        if size <= 0:
+            raise RuntimeError(f"Saved IDB/I64 path is empty after save: {database_path}")
+        _stage("database_save_done", {"database_path": database_path, "database_size": size})
+        return database_path
+
+
     def main():
         try:
             _stage("ida_bootstrap_start")
             import ida_auto
             import idaapi
+            import ida_loader
 
             _stage("auto_wait_start")
             ida_auto.auto_wait()
             _stage("auto_wait_done")
+
+            if IDA_API_TEST_MODE == "apply_changes":
+                _save_database_for_apply_changes(idaapi, ida_loader)
 
             if PLUGIN_DIR not in sys.path:
                 sys.path.insert(0, PLUGIN_DIR)
@@ -319,6 +377,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             "__HEARTBEAT_PATH_JSON__": json.dumps(str(heartbeat_path)),
             "__PLUGIN_DIR_JSON__": json.dumps(str(plugin_dir)),
             "__BOOTSTRAP_DLL_PATH_JSON__": json.dumps(str(Path(DLL_PATH))),
+            "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__": json.dumps(IDA_API_TEST_MODE),
         }
         for placeholder, value in replacements.items():
             bootstrap_text = bootstrap_text.replace(placeholder, value)

@@ -101,6 +101,8 @@ UNSAFE_GUI_EXECUTE_ENV = "IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE"
 
 INSTANCE_INFO_FILE = Path.home() / ".ida_script_mcp_instances.json"
 INSTANCE_LOCK = threading.Lock()
+DATABASE_CHANGE_COUNT_BASELINE: int | None = None
+DATABASE_CHANGE_COUNT_BASELINE_ERROR: str | None = None
 
 
 def get_instance_id() -> str:
@@ -629,18 +631,67 @@ def _database_dirty_state() -> tuple[bool | None, str | None]:
     if not HAS_IDA:
         return None, "IDA APIs unavailable"
     checker = getattr(idaapi, "is_database_modified", None)
-    if checker is None:
-        return None, "idaapi.is_database_modified is unavailable"
+    if checker is not None:
+        try:
+            return bool(checker()), None
+        except Exception as exc:
+            return None, str(exc)
+
+    change_count, change_error = _current_database_change_count()
+    if change_count is None:
+        suffix = f"; {change_error}" if change_error else ""
+        return None, f"idaapi.is_database_modified is unavailable{suffix}"
+    if DATABASE_CHANGE_COUNT_BASELINE is None:
+        suffix = (
+            f"; baseline error: {DATABASE_CHANGE_COUNT_BASELINE_ERROR}"
+            if DATABASE_CHANGE_COUNT_BASELINE_ERROR
+            else ""
+        )
+        return None, f"database change-count baseline is unavailable{suffix}"
+    return change_count != DATABASE_CHANGE_COUNT_BASELINE, None
+
+
+def _current_database_change_count() -> tuple[int | None, str | None]:
+    if not HAS_IDA:
+        return None, "IDA APIs unavailable"
+
+    errors: list[str] = []
     try:
-        return bool(checker()), None
+        ida_ida = __import__("ida_ida")
+        getter = getattr(ida_ida, "inf_get_database_change_count", None)
+        if getter is not None:
+            return int(getter()), None
     except Exception as exc:
-        return None, str(exc)
+        errors.append(f"ida_ida.inf_get_database_change_count failed: {exc}")
+
+    try:
+        inf = idaapi.get_inf_structure()
+        value = getattr(inf, "database_change_count", None)
+        if value is not None:
+            return int(value), None
+    except Exception as exc:
+        errors.append(f"idaapi.get_inf_structure().database_change_count failed: {exc}")
+
+    return None, "; ".join(errors) or "database_change_count is unavailable"
+
+
+def _initialize_database_change_baseline() -> dict[str, Any]:
+    global DATABASE_CHANGE_COUNT_BASELINE, DATABASE_CHANGE_COUNT_BASELINE_ERROR
+
+    change_count, error = _current_database_change_count()
+    DATABASE_CHANGE_COUNT_BASELINE = change_count
+    DATABASE_CHANGE_COUNT_BASELINE_ERROR = error
+    return {
+        "database_change_baseline": change_count,
+        "database_change_baseline_error": error,
+    }
 
 
 def _collect_database_info() -> dict[str, Any]:
     saved_db_path = _saved_database_path()
     input_path = _input_file_path()
     dirty_state, dirty_error = _database_dirty_state()
+    change_count, change_error = _current_database_change_count()
     info: dict[str, Any] = {
         "instance_id": instance_registry.instance_id,
         "port": instance_registry.port,
@@ -651,9 +702,24 @@ def _collect_database_info() -> dict[str, Any]:
         "dirty": dirty_state,
         "unsaved": dirty_state,
         "dirty_state_known": dirty_state is not None,
+        "dirty_state_method": (
+            "idaapi.is_database_modified"
+            if HAS_IDA and getattr(idaapi, "is_database_modified", None) is not None
+            else "database_change_count_baseline"
+            if HAS_IDA
+            else "unavailable"
+        ),
     }
     if dirty_error:
         info["dirty_error"] = dirty_error
+    if change_count is not None:
+        info["database_change_count"] = change_count
+    if change_error:
+        info["database_change_count_error"] = change_error
+    if DATABASE_CHANGE_COUNT_BASELINE is not None:
+        info["database_change_baseline"] = DATABASE_CHANGE_COUNT_BASELINE
+    if DATABASE_CHANGE_COUNT_BASELINE_ERROR:
+        info["database_change_baseline_error"] = DATABASE_CHANGE_COUNT_BASELINE_ERROR
 
     if not saved_db_path:
         info["database_identity_known"] = False
@@ -1476,6 +1542,7 @@ if HAS_IDA:
                     self.server = IdaScriptHttpServer(self.host, port)
                     self.port = port
 
+                    baseline = _initialize_database_change_baseline()
                     instance_registry.register(port)
 
                     self.server_thread = threading.Thread(
@@ -1487,6 +1554,16 @@ if HAS_IDA:
                     print(f"[{PLUGIN_NAME}] Server started at http://{self.host}:{port}")
                     print(f"[{PLUGIN_NAME}] Instance ID: {instance_registry.instance_id}")
                     print(f"[{PLUGIN_NAME}] Database: {instance_registry.database}")
+                    if baseline.get("database_change_baseline") is None:
+                        print(
+                            f"[{PLUGIN_NAME}] Database change-count baseline unavailable: "
+                            f"{baseline.get('database_change_baseline_error')}"
+                        )
+                    else:
+                        print(
+                            f"[{PLUGIN_NAME}] Database change-count baseline: "
+                            f"{baseline.get('database_change_baseline')}"
+                        )
                     print(
                         f"[{PLUGIN_NAME}] Metadata endpoint: GET http://{self.host}:{port}/metadata"
                     )
