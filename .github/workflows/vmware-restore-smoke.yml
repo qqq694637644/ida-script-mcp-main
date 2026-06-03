@@ -19,34 +19,42 @@ jobs:
 
     steps:
       - name: Run host snapshot restore script
-        shell: cmd
+        shell: py -3 {0}
         run: |
-          echo RUNNER_NAME=%RUNNER_NAME%
-          echo COMPUTERNAME=%COMPUTERNAME%
-          whoami
-          if not "%RUNNER_NAME%"=="HostMachine" exit /b 1
-          cd /d C:\Users\alion\Scripts || exit /b 1
-          if not exist vmware_restore_test1.py exit /b 1
-          echo Clearing RUNNER_TRACKING_ID so VMware child processes survive job cleanup.
-          set RUNNER_TRACKING_ID=
-          echo PATH=%PATH%
-          where python
-          echo where_python_exit=%ERRORLEVEL%
-          where py
-          echo where_py_exit=%ERRORLEVEL%
-          python --version
-          echo python_version_exit=%ERRORLEVEL%
-          py -3 --version
-          echo py_version_exit=%ERRORLEVEL%
-          where py >nul 2>nul
-          if errorlevel 1 goto try_python
-          py -3 vmware_restore_test1.py --gui
-          exit /b %ERRORLEVEL%
-          :try_python
-          python --version >nul 2>nul
-          if errorlevel 1 goto no_python
-          python vmware_restore_test1.py --gui
-          exit /b %ERRORLEVEL%
-          :no_python
-          echo Neither working py nor working python is available to the HostMachine service environment.
-          exit /b 9009
+          import os
+          import socket
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          def fail(message: str, code: int = 1) -> None:
+              print(f"ERROR: {message}", file=sys.stderr)
+              raise SystemExit(code)
+
+          runner_name = os.environ.get("RUNNER_NAME", "")
+          print(f"RUNNER_NAME={runner_name}")
+          print(f"COMPUTERNAME={os.environ.get('COMPUTERNAME', '')}")
+          print(f"USERNAME={os.environ.get('USERNAME', '')}")
+          print(f"HOSTNAME={socket.gethostname()}")
+          print(f"PYTHON={sys.executable}")
+          print(f"PYTHON_VERSION={sys.version}")
+
+          if runner_name != "HostMachine":
+              fail(f"expected RUNNER_NAME=HostMachine, got {runner_name!r}")
+
+          scripts_dir = Path(r"C:\Users\alion\Scripts")
+          restore_script = scripts_dir / "vmware_restore_test1.py"
+          if not scripts_dir.is_dir():
+              fail(f"scripts directory does not exist: {scripts_dir}")
+          if not restore_script.is_file():
+              fail(f"restore script does not exist: {restore_script}")
+
+          env = os.environ.copy()
+          if env.pop("RUNNER_TRACKING_ID", None) is not None:
+              print("Cleared RUNNER_TRACKING_ID so VMware child processes survive job cleanup.")
+          os.environ.pop("RUNNER_TRACKING_ID", None)
+
+          command = [sys.executable, str(restore_script), "--gui"]
+          print("Running:", " ".join(command))
+          result = subprocess.run(command, cwd=str(scripts_dir), env=env, check=False)
+          raise SystemExit(result.returncode)
