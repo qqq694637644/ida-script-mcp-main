@@ -59,6 +59,11 @@ disposable-vm-host = [
 disposable-vm-guest = [
     "requests>=2.32.0",
 ]
+disposable-vm-guest-automation = [
+    "requests>=2.32.0",
+    "pywinauto>=0.6.8",
+    "psutil>=5.9.0",
+]
 disposable-vm = [
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
@@ -78,6 +83,7 @@ ida-script-mcp-install = "ida_script_mcp.installer:main"
 ida-script-mcp-vm-host-controller = "ida_script_mcp.disposable_vm.host_controller:main"
 ida-script-mcp-vm-guest-agent = "ida_script_mcp.guest_vm.agent:main"
 ida-script-mcp-vm-guest-check-imports = "ida_script_mcp.guest_vm.required_imports:main"
+ida-script-mcp-vm-guest-check-automation-imports = "ida_script_mcp.guest_vm.required_automation_imports:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -94,6 +100,7 @@ where = ["src"]
 ida_script_mcp = [
     "py.typed",
     "guest_vm/requirements.txt",
+    "guest_vm/automation_requirements.txt",
     "resources/*.md",
     "resources/idapython/*.md",
     "resources/idapython/docs/*.md",

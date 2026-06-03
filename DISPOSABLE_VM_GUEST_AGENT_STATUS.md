@@ -15,7 +15,9 @@ src/ida_script_mcp/disposable_vm/
 src/ida_script_mcp/guest_vm/
   agent.py
   required_imports.py
+  required_automation_imports.py
   requirements.txt
+  automation_requirements.txt
 
 src/ida_script_mcp/payload/
   disposable_vm.py
@@ -76,6 +78,37 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 
 ```powershell
 ida-script-mcp-vm-guest-check-imports
+```
+
+### Guest automation snapshot dependency files
+
+- 插件本身安装到 IDA 时不强制要求额外三方库；`ida_plugin.py` 和 support files 使用 Python stdlib 与 IDA 自带模块，`pydantic` 相关模型有 fallback。
+- guest agent 连接 host controller 的最低三方库仍是 `requests>=2.32.0`。
+- 后续“打开 IDA、等待分析完成、测试插件 HTTP API”的 automation snapshot 需要额外预装：
+
+```text
+src/ida_script_mcp/guest_vm/automation_requirements.txt
+```
+
+- 当前 automation snapshot 预装清单：
+
+```text
+requests>=2.32.0
+pywinauto>=0.6.8
+psutil>=5.9.0
+```
+
+- 主自动化库选择 `pywinauto`：用于 Windows GUI/process automation；功能 API 测试继续用 `requests` 调插件 HTTP endpoint；进程发现和清理由 `psutil` 辅助。
+- 已提供 automation 导入检查模块：
+
+```powershell
+py -3.11 -m ida_script_mcp.guest_vm.required_automation_imports
+```
+
+- 已提供 console entry point：
+
+```powershell
+ida-script-mcp-vm-guest-check-automation-imports
 ```
 
 ### Workflow
@@ -267,6 +300,16 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - guest 解包并部署测试环境。
 - guest 运行真实 IDA integration deployment/test steps。
 - host 收集 logs/artifacts 并按 guest exit code 决定 workflow success/failure。
+
+### IDA GUI automation test plan
+
+- 使用 `pywinauto` 作为 Windows GUI/process 自动化库。
+- guest-side payload 后续会：
+  - 启动 IDA 8.3 并打开指定 DLL。
+  - 通过 IDAPython/bootstrap 等待 auto-analysis 完成。
+  - 启动或调用已安装的 `IDA-Script-MCP` 插件。
+  - 使用 `requests` 测试插件 HTTP endpoints，例如 metadata/functions/decompile/xrefs。
+  - 回传 stdout/stderr/result metadata 和 artifact manifest。
 
 ### 后续增强
 

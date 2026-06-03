@@ -93,6 +93,36 @@ If the guest snapshot cannot install the whole repository package, copy the
 agent plus `src/ida_script_mcp/guest_vm/requirements.txt` into the snapshot and
 install `requests` in that Python 3.11.7 environment.
 
+For the next automation snapshot layer used to open IDA, drive the Windows GUI,
+and call plugin HTTP APIs, install:
+
+```powershell
+py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\automation_requirements.txt
+```
+
+This currently installs:
+
+```text
+requests>=2.32.0
+pywinauto>=0.6.8
+psutil>=5.9.0
+```
+
+`pywinauto` is the primary Windows automation library for IDA GUI/process smoke
+tests. `requests` is used for guest-agent and plugin HTTP API checks. `psutil`
+is used for reliable process discovery and cleanup. Verify the automation
+snapshot imports with:
+
+```powershell
+py -3.11 -m ida_script_mcp.guest_vm.required_automation_imports
+```
+
+The console entry point is also available after package installation:
+
+```powershell
+ida-script-mcp-vm-guest-check-automation-imports
+```
+
 ## Host controller example
 
 ```powershell

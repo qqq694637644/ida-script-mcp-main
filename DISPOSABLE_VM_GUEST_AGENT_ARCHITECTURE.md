@@ -353,6 +353,18 @@ guest uploads logs/artifacts
 host workflow reflects the result
 ```
 
+Automation dependency choice:
+
+```text
+Primary Windows automation library: pywinauto>=0.6.8
+HTTP API checks: requests>=2.32.0
+Process discovery/cleanup: psutil>=5.9.0
+```
+
+Rationale: use IDA's own command-line/IDAPython hooks for deterministic binary
+loading and analysis waits, use `pywinauto` only for Windows GUI/process control
+where needed, and test actual plugin behavior through HTTP endpoints.
+
 ### Phase 4a: IDA plugin install smoke
 
 Goal: host dynamically sends an install/verify payload to guest and validates
