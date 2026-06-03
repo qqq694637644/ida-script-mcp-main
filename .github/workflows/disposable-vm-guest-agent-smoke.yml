@@ -1,0 +1,87 @@
+name: Disposable VM guest agent smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      controller_url:
+        description: "URL guest can use to reach the host controller"
+        required: true
+      port:
+        description: "Host controller listen port"
+        required: true
+        default: "8766"
+      restore_script:
+        description: "HostMachine VMware restore script path"
+        required: true
+        default: "C:\\Users\\alion\\Scripts\\vmware_restore_test1.py"
+      restore_gui:
+        description: "Pass --gui to the restore script"
+        required: true
+        type: boolean
+        default: true
+      task_action:
+        description: "Guest task action"
+        required: true
+        type: choice
+        options:
+          - noop
+          - command
+        default: noop
+      connect_timeout_seconds:
+        description: "Seconds to wait for guest /hello"
+        required: true
+        default: "600"
+      run_timeout_seconds:
+        description: "Seconds to wait for guest /result"
+        required: true
+        default: "1800"
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-vm-smoke:
+    name: Host controller and guest agent smoke
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install host controller dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          py -3 -m pip install --disable-pip-version-check -e ".[disposable-vm-host]"
+
+      - name: Run disposable VM guest agent smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $resultDir = Join-Path $env:RUNNER_TEMP "ida-script-mcp-disposable-vm"
+          New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
+
+          $controllerArgs = @(
+            "--bind-host", "0.0.0.0",
+            "--port", "${{ inputs.port }}",
+            "--advertise-url", "${{ inputs.controller_url }}",
+            "--task-action", "${{ inputs.task_action }}",
+            "--connect-timeout-seconds", "${{ inputs.connect_timeout_seconds }}",
+            "--timeout-seconds", "${{ inputs.run_timeout_seconds }}",
+            "--result-dir", $resultDir,
+            "--vmware-restore-script", "${{ inputs.restore_script }}"
+          )
+          if ("${{ inputs.restore_gui }}" -eq "true") {
+            $controllerArgs += "--vmware-restore-arg=--gui"
+          }
+
+          py -3 -m ida_script_mcp.disposable_vm.host_controller @controllerArgs
+
+      - name: Upload disposable VM smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: disposable-vm-guest-agent-smoke
+          path: ${{ runner.temp }}\ida-script-mcp-disposable-vm
+          if-no-files-found: warn
