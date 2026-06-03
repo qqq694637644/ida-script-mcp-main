@@ -1225,23 +1225,38 @@ def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
         raise RuntimeError("IDA runtime is unavailable for GUI change replay")
     module = __import__("ida_bytes")
     patch_bytes = getattr(module, "patch_bytes", None)
-    patch_byte = getattr(module, "patch_byte", None)
+    patch_byte_candidates = []
+    candidate_modules = [("ida_bytes", module)]
+    try:
+        candidate_modules.append(("idc", __import__("idc")))
+    except Exception:
+        pass
+    for module_name, candidate_module in candidate_modules:
+        patch_byte = getattr(candidate_module, "patch_byte", None)
+        if patch_byte is not None:
+            patch_byte_candidates.append((module_name, patch_byte))
 
-    if patch_bytes is None and patch_byte is None:
+    if patch_bytes is None and not patch_byte_candidates:
         raise RuntimeError("Required IDAPython API is unavailable: ida_bytes.patch_bytes")
 
+    attempts = []
     if patch_bytes is not None:
         ok = patch_bytes(ea, data)
         if ok:
             return True
+        attempts.append("ida_bytes.patch_bytes returned failure")
 
-    if patch_byte is None:
-        return False
+    for module_name, patch_byte in patch_byte_candidates:
+        failed_at: int | None = None
+        for offset, value in enumerate(data):
+            if not patch_byte(ea + offset, value):
+                failed_at = offset
+                break
+        if failed_at is None:
+            return True
+        attempts.append(f"{module_name}.patch_byte returned failure at offset {failed_at}")
 
-    for offset, value in enumerate(data):
-        if not patch_byte(ea + offset, value):
-            return False
-    return True
+    raise RuntimeError("; ".join(attempts) or "IDA byte patch APIs returned failure")
 
 
 def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
