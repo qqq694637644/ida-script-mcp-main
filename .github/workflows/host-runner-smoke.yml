@@ -1,0 +1,50 @@
+name: Host runner smoke
+
+on:
+  push:
+    branches:
+      - gpt/execute-subsystem-20260602-1dc47a
+    paths:
+      - ".github/workflows/host-runner-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: HostMachine smoke
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 10
+
+    steps:
+      - name: Print runner context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          Write-Host "RUNNER_OS=$env:RUNNER_OS"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          Write-Host "RUNNER_TEMP=$env:RUNNER_TEMP"
+          Write-Host "GITHUB_WORKSPACE=$env:GITHUB_WORKSPACE"
+          Write-Host "User=$(whoami)"
+          Write-Host "Host=$(hostname)"
+          if ($env:RUNNER_NAME -ne 'HostMachine') {
+            Write-Warning "Expected HostMachine, got $env:RUNNER_NAME"
+          }
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify checkout and host tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git --version
+          git status --short
+          if (Get-Command python -ErrorAction SilentlyContinue) {
+            python --version
+          } else {
+            Write-Host 'python not found on host runner; runner dispatch/checkout smoke still passed.'
+          }
+          Write-Host 'Host runner smoke completed.'
