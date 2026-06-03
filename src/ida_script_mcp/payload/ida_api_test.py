@@ -341,10 +341,29 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
     def _install_plugin_files() -> Path:
         plugin_dir = _ida_user_dir() / "plugins"
         plugin_dir.mkdir(parents=True, exist_ok=True)
+        removed_legacy_support_files = []
         for legacy_name in LEGACY_ROOT_SUPPORT_FILES:
             legacy_path = plugin_dir / legacy_name
             if legacy_path.exists() or legacy_path.is_symlink():
                 legacy_path.unlink()
+                removed_legacy_support_files.append(str(legacy_path))
+        remaining_legacy_support_files = [
+            str(plugin_dir / legacy_name)
+            for legacy_name in LEGACY_ROOT_SUPPORT_FILES
+            if (plugin_dir / legacy_name).exists() or (plugin_dir / legacy_name).is_symlink()
+        ]
+        _stage(
+            "legacy_support_cleanup_done",
+            {
+                "removed": removed_legacy_support_files,
+                "remaining": remaining_legacy_support_files,
+            },
+        )
+        if remaining_legacy_support_files:
+            raise RuntimeError(
+                "Legacy root support files remain in IDA plugins directory: "
+                + ", ".join(remaining_legacy_support_files)
+            )
         for destination, encoded in FILES_B64.items():
             path = plugin_dir / destination
             content = base64.b64decode(encoded.encode("ascii"))

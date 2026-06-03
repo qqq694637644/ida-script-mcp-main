@@ -25,6 +25,8 @@ def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None
     assert f'IDA_API_TEST_MODE = "{DEFAULT_IDA_API_TEST_MODE}"' in script
     assert "IDA_PLUGIN_API_TEST_RESULT=" in script
     assert "IDA_API_STAGE=" in script
+    assert "legacy_support_cleanup_done" in script
+    assert "Legacy root support files remain" in script
     assert "ida_ready.json" in script
     assert "ida_ready_wait_start" in script
     assert "_run_external_api_tests" in script

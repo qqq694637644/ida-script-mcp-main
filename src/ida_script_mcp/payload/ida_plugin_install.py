@@ -143,10 +143,22 @@ def build_guest_ida_plugin_install_script(
             ida_user_dir = _ida_user_dir()
             plugin_dir = ida_user_dir / "plugins"
             plugin_dir.mkdir(parents=True, exist_ok=True)
+            removed_legacy_support_files = []
             for legacy_name in LEGACY_ROOT_SUPPORT_FILES:
                 legacy_path = plugin_dir / legacy_name
                 if legacy_path.exists() or legacy_path.is_symlink():
                     legacy_path.unlink()
+                    removed_legacy_support_files.append(str(legacy_path))
+            remaining_legacy_support_files = [
+                str(plugin_dir / legacy_name)
+                for legacy_name in LEGACY_ROOT_SUPPORT_FILES
+                if (plugin_dir / legacy_name).exists() or (plugin_dir / legacy_name).is_symlink()
+            ]
+            if remaining_legacy_support_files:
+                raise RuntimeError(
+                    "Legacy root support files remain in IDA plugins directory: "
+                    + ", ".join(remaining_legacy_support_files)
+                )
 
             installed: dict[str, dict[str, object]] = {{}}
             for destination, encoded in files_b64.items():
@@ -191,6 +203,8 @@ def build_guest_ida_plugin_install_script(
                 "plugin_dir": str(plugin_dir),
                 "installed": installed,
                 "imported_support": imported_support,
+                "removed_legacy_support_files": removed_legacy_support_files,
+                "remaining_legacy_support_files": remaining_legacy_support_files,
                 "plugin_name": plugin_name,
                 "plugin_has_ida_runtime": bool(getattr(plugin_module, "HAS_IDA", False)),
             }}
