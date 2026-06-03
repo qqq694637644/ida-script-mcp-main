@@ -19,32 +19,24 @@ jobs:
 
     steps:
       - name: Print runner context
-        shell: powershell
+        shell: cmd
         run: |
-          $ErrorActionPreference = 'Stop'
-          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
-          Write-Host "RUNNER_OS=$env:RUNNER_OS"
-          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
-          Write-Host "RUNNER_TEMP=$env:RUNNER_TEMP"
-          Write-Host "GITHUB_WORKSPACE=$env:GITHUB_WORKSPACE"
-          Write-Host "User=$(whoami)"
-          Write-Host "Host=$(hostname)"
-          if ($env:RUNNER_NAME -ne 'HostMachine') {
-            Write-Warning "Expected HostMachine, got $env:RUNNER_NAME"
-          }
+          echo RUNNER_NAME=%RUNNER_NAME%
+          echo RUNNER_OS=%RUNNER_OS%
+          echo RUNNER_ARCH=%RUNNER_ARCH%
+          echo RUNNER_TEMP=%RUNNER_TEMP%
+          echo GITHUB_WORKSPACE=%GITHUB_WORKSPACE%
+          whoami
+          hostname
+          if not "%RUNNER_NAME%"=="HostMachine" echo Warning: expected HostMachine, got %RUNNER_NAME%
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Verify checkout and host tools
-        shell: powershell
+        shell: cmd
         run: |
-          $ErrorActionPreference = 'Stop'
-          git --version
-          git status --short
-          if (Get-Command python -ErrorAction SilentlyContinue) {
-            python --version
-          } else {
-            Write-Host 'python not found on host runner; runner dispatch/checkout smoke still passed.'
-          }
-          Write-Host 'Host runner smoke completed.'
+          git --version || exit /b 1
+          git status --short || exit /b 1
+          where python >nul 2>nul && python --version || echo python not found on host runner; runner dispatch/checkout smoke still passed.
+          echo Host runner smoke completed.
