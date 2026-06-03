@@ -126,6 +126,19 @@ Failure: vmware_restore_test1.py --gui reported available snapshot `Snapshot 1` 
 Next action: workflow now supports run_vmware_restore=false and restore_extra_args_json so IDA API payload can be tested against an already-running guest or with restore-script-specific extra args.
 ```
 
+### Run 26906429830 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26906429830
+Commit: b7f838e05eae1cc9ef16f6c0de3e1dc62b33f687
+Inputs: task_action=ida_plugin_api_test, run_vmware_restore=false, connect_timeout_seconds=90, ida_dir=C:\Users\alion\Desktop\IDAPro8.3, dll_path=C:\Users\alion\Desktop\test1.dll
+Conclusion: failure
+Artifact ID: 7394059553
+Result summary: controller started and waited for an already-running guest, but no guest connected.
+Failure: controller_state.json status=guest_connect_timeout, hello=null, payload_downloaded=false.
+Next action: restore/start guest VM is required before the IDA API payload can execute. The VMware snapshot currently visible to the restore script is `Snapshot 1`, while the script targets `test1`; either restore/rename the VM snapshot to `test1`, or provide restore script arguments that select `Snapshot 1` if the script supports that.
+```
+
 ## Update protocol
 
 After every real workflow run, append:
