@@ -128,7 +128,7 @@ For autostart, configure the same command in the snapshot. The agent also reads
 `IDA_SCRIPT_MCP_CONTROLLER_URL`, `IDA_SCRIPT_MCP_GUEST_ID`,
 `IDA_SCRIPT_MCP_GUEST_BOOT_ID`, and `IDA_SCRIPT_MCP_GUEST_WORK_ROOT`.
 
-## Supported phase-1 task actions
+## Supported phase-1 / phase-2 task actions
 
 `noop` proves connectivity and returns the guest Python version and executable.
 
@@ -143,6 +143,13 @@ A custom command can be supplied as JSON:
 
 ```powershell
 --task-action command --command-json '["python", "--version"]'
+```
+
+The workflow exposes the same command support through these inputs:
+
+```text
+task_action=command
+command_json=["python", "--version"]
 ```
 
 `python_script` downloads UTF-8 script text, writes it under the guest job

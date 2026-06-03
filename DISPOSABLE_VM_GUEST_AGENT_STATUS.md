@@ -32,6 +32,7 @@ src/ida_script_mcp/payload/
   - `POST /result/{job_id}`
   - `GET /health`
 - 支持 `noop`、`command`、`python_script` 三种 task action。
+- `command` task 支持 JSON list-form command，例如 `["python", "--version"]`。
 - 会在启动 VMware restore script 前清理 `RUNNER_TRACKING_ID`。
 - 会把 controller state、hello、payload、guest logs、result、VMware restore metadata 写入 result directory。
 - HostMachine 不需要提前做快照依赖准备；controller 会检测 host runtime imports，缺失时自动安装：
@@ -46,9 +47,10 @@ src/ida_script_mcp/payload/
 - guest 不注册 GitHub runner，不持有 GitHub token。
 - 支持启动后 `POST /hello`，下载 payload，执行任务，然后 `POST /result`。
 - `noop` task 会返回 guest Python version 和 executable。
-- `command` task 使用 list-form command，不通过 shell 执行。
+- `command` task 使用 list-form command，不通过 shell 执行，并回传 stdout/stderr tail、exit code 和 metadata。
 - `python_script` task 会把 UTF-8 payload 写成 `payload.py` 并用 guest 当前 Python 执行。
 - guest stdout/stderr 会截断为 tail 后回传，避免结果过大。
+- `--controller-url` 支持 `http://host:port`，也支持省略 scheme 的 `host:port`；省略时自动补成 `http://`。
 
 ### Guest snapshot dependency files
 
@@ -84,7 +86,7 @@ ida-script-mcp-vm-guest-check-imports
 .github/workflows/disposable-vm-guest-agent-smoke.yml
 ```
 
-- workflow 当前目标是 Phase 1 connectivity smoke：
+- workflow 已支持 Phase 1 connectivity smoke：
   - checkout repository
   - install project package on HostMachine
   - start host controller
@@ -94,6 +96,31 @@ ida-script-mcp-vm-guest-check-imports
   - wait for guest `/result`
   - upload logs/artifacts
 
+- workflow 已支持 Phase 2 simple command：
+  - input `task_action=command`
+  - input `command_json`, default `["python", "--version"]`
+  - host controller 将 command payload 下发给 guest
+  - guest 执行 list-form command 并回传 stdout/stderr/exit_code
+
+### Phase 1 verification
+
+- Phase 1 已在 HostMachine self-hosted runner 上通过 workflow_dispatch 实机验证。
+- Verified run:
+
+```text
+https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26900876629
+attempt 2
+conclusion=success
+runner=HostMachine
+```
+
+- 通过的步骤包括：
+  - `Set up job`
+  - `Check out repository`
+  - `Install project package`
+  - `Run disposable VM guest agent smoke`
+  - `Upload disposable VM smoke logs`
+
 ### Tests
 
 - 已新增 protocol / host controller / guest agent / guest dependency check 单元测试。
@@ -101,35 +128,37 @@ ida-script-mcp-vm-guest-check-imports
 
 ```text
 py -3 -m pytest -q
-112 passed
+116 passed
 
 py -3 -m ruff check src tests
 All checks passed
 ```
 
-## 待实现
+## 待验证
 
-### Phase 1 实机验证
+### Phase 2 实机验证
 
-- 在 HostMachine self-hosted runner 上触发 `Disposable VM guest agent smoke` workflow。
-- 确认 HostMachine 能启动 controller 并调用：
+- 使用 workflow_dispatch 触发 `Disposable VM guest agent smoke`。
+- 输入：
 
-```powershell
-C:\Users\alion\Scripts\vmware_restore_test1.py --gui
+```text
+task_action=command
+command_json=["python", "--version"]
+controller_url=http://192.168.1.249:8766
 ```
 
-- 确认 guest snapshot 中的 agent 能自动启动并连接 host controller。
-- 确认 guest 返回 `exit_code=0`，并在 workflow artifact 中保存：
-  - `controller_state.json`
-  - `hello.json`
-  - `payload.json`
-  - `guest_logs.ndjson`
-  - `result.json`
-  - `vmware_restore.json`
+- 验收：
+  - guest 执行 `python --version`
+  - guest result 包含 stdout/stderr tail
+  - guest result 包含 `exit_code=0`
+  - workflow conclusion 为 success
+  - artifact 中保存 `result.json` 和 `guest_logs.ndjson`
 
-### Guest snapshot preparation
+## 待实现
 
-- 在 guest VM Python 3.11.7 中手动安装：
+### Guest snapshot preparation automation
+
+- 在 guest VM Python 3.11.7 中手动安装仍由操作者完成：
 
 ```powershell
 py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\requirements.txt
@@ -144,17 +173,6 @@ py -3.11 -m ida_script_mcp.guest_vm.required_imports
 - 配置 guest agent 开机自启。
 - 确认 guest agent 使用的 controller endpoint 和 HostMachine VMware network 地址一致。
 - 完成 clean snapshot 制作。
-
-### Phase 2: simple command
-
-- 用 workflow 下发 `command` task。
-- 首个命令建议：
-
-```json
-["python", "--version"]
-```
-
-- 验收：guest 返回 Python version、stdout/stderr、`exit_code=0`。
 
 ### Phase 3: Python script payload
 

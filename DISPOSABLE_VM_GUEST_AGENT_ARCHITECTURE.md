@@ -283,6 +283,13 @@ guest returns exit_code=0
 workflow passes
 ```
 
+Implementation status:
+
+```text
+Implemented and verified by workflow_dispatch on HostMachine.
+Verified run: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26900876629 attempt 2
+```
+
 ### Phase 2: run simple command
 
 Goal: run a trivial command in guest and return stdout/stderr.
@@ -299,6 +306,14 @@ Acceptance:
 guest returns Python version
 guest result includes exit_code=0
 host workflow passes
+```
+
+Implementation status:
+
+```text
+Implemented in host controller, guest agent, and disposable VM workflow.
+Workflow inputs: task_action=command, command_json=["python", "--version"]
+Verification status: pending Phase 2 workflow_dispatch run.
 ```
 
 ### Phase 3: upload and execute script
@@ -345,6 +360,7 @@ Relevant workflow smoke files:
 ```text
 .github/workflows/host-runner-smoke.yml
 .github/workflows/vmware-restore-smoke.yml
+.github/workflows/disposable-vm-guest-agent-smoke.yml
 ```
 
 ## 13. Non-goals for first implementation

@@ -28,6 +28,10 @@ on:
           - noop
           - command
         default: noop
+      command_json:
+        description: "JSON command array used when task_action=command"
+        required: false
+        default: '["python", "--version"]'
       connect_timeout_seconds:
         description: "Seconds to wait for guest /hello"
         required: true
@@ -78,6 +82,8 @@ jobs:
           }
           $taskAction = "${{ inputs.task_action }}"
           if ([string]::IsNullOrWhiteSpace($taskAction)) { $taskAction = "noop" }
+          $commandJson = '${{ inputs.command_json }}'
+          if ([string]::IsNullOrWhiteSpace($commandJson)) { $commandJson = '["python", "--version"]' }
           $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
           if ([string]::IsNullOrWhiteSpace($connectTimeout)) { $connectTimeout = "600" }
           $runTimeout = "${{ inputs.run_timeout_seconds }}"
@@ -97,6 +103,9 @@ jobs:
           )
           if ($restoreGui -eq "true") {
             $controllerArgs += "--vmware-restore-arg=--gui"
+          }
+          if ($taskAction -eq "command") {
+            $controllerArgs += @("--command-json", $commandJson)
           }
 
           py -3 -m ida_script_mcp.disposable_vm.host_controller @controllerArgs
