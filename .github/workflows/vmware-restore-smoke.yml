@@ -27,6 +27,8 @@ jobs:
           if not "%RUNNER_NAME%"=="HostMachine" exit /b 1
           cd /d C:\Users\alion\Scripts || exit /b 1
           if not exist vmware_restore_test1.py exit /b 1
+          echo Clearing RUNNER_TRACKING_ID so VMware child processes survive job cleanup.
+          set RUNNER_TRACKING_ID=
           echo PATH=%PATH%
           where python
           echo where_python_exit=%ERRORLEVEL%
