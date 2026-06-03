@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -26,12 +28,77 @@ from ida_script_mcp.payload.disposable_vm import (
 )
 
 HOST_DEPENDENCY_HINT = (
-    "Install host dependencies with: "
+    "Host controller dependencies are installed automatically by default. "
+    "To preinstall them manually, run: "
     'python -m pip install -e ".[disposable-vm-host]"'
 )
+HOST_RUNTIME_REQUIREMENTS = {
+    "fastapi": "fastapi>=0.115.0",
+    "uvicorn": "uvicorn>=0.30.0",
+}
+
+
+def _host_auto_install_enabled() -> bool:
+    value = os.environ.get("IDA_SCRIPT_MCP_VM_HOST_AUTO_INSTALL", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _module_available(import_name: str) -> bool:
+    return importlib.util.find_spec(import_name) is not None
+
+
+def missing_host_runtime_modules(import_names: list[str] | None = None) -> list[str]:
+    """Return host runtime import names that are currently unavailable."""
+
+    names = import_names or list(HOST_RUNTIME_REQUIREMENTS)
+    return [name for name in names if not _module_available(name)]
+
+
+def _install_host_runtime_modules(import_names: list[str]) -> None:
+    package_specs = [HOST_RUNTIME_REQUIREMENTS[name] for name in import_names]
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        *package_specs,
+    ]
+    print(
+        "Installing missing host controller dependencies: " + ", ".join(package_specs),
+        flush=True,
+    )
+    subprocess.run(command, check=True)
+    importlib.invalidate_caches()
+
+
+def ensure_host_runtime_modules(import_names: list[str] | None = None) -> None:
+    """Ensure host-only runtime dependencies are importable, installing if needed."""
+
+    missing = missing_host_runtime_modules(import_names)
+    if not missing:
+        return
+    if not _host_auto_install_enabled():
+        package_specs = [HOST_RUNTIME_REQUIREMENTS[name] for name in missing]
+        raise RuntimeError(
+            "Missing host controller dependencies with auto-install disabled: "
+            + ", ".join(package_specs)
+            + ". "
+            + HOST_DEPENDENCY_HINT
+        )
+
+    _install_host_runtime_modules(missing)
+    still_missing = missing_host_runtime_modules(import_names)
+    if still_missing:
+        package_specs = [HOST_RUNTIME_REQUIREMENTS[name] for name in still_missing]
+        raise RuntimeError(
+            "Host controller dependency installation finished but imports still fail: "
+            + ", ".join(package_specs)
+        )
 
 
 def _require_fastapi() -> tuple[Any, Any]:
+    ensure_host_runtime_modules(["fastapi"])
     try:
         from fastapi import FastAPI, HTTPException
     except ImportError as exc:  # pragma: no cover - depends on optional extra.
@@ -40,6 +107,7 @@ def _require_fastapi() -> tuple[Any, Any]:
 
 
 def _require_uvicorn() -> Any:
+    ensure_host_runtime_modules(["uvicorn"])
     try:
         import uvicorn
     except ImportError as exc:  # pragma: no cover - depends on optional extra.
@@ -446,12 +514,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
         help="Argument passed to the VMware restore script; use --vmware-restore-arg=--gui",
     )
+    parser.add_argument(
+        "--no-auto-install-deps",
+        action="store_true",
+        help="Fail instead of pip-installing missing host controller dependencies.",
+    )
     parser.add_argument("--log-level", default="info")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.no_auto_install_deps:
+        os.environ["IDA_SCRIPT_MCP_VM_HOST_AUTO_INSTALL"] = "0"
     raise SystemExit(run_controller(args))
 
 

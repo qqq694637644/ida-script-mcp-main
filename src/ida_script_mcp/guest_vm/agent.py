@@ -23,8 +23,11 @@ from pathlib import Path
 from typing import Any
 
 GUEST_DEPENDENCY_HINT = (
-    "Install guest dependencies with: "
-    'python -m pip install -e ".[disposable-vm-guest]"'
+    "The guest VM snapshot must have guest dependencies installed before the "
+    "snapshot is taken. Check them with: "
+    "python -m ida_script_mcp.guest_vm.required_imports. "
+    "Install them with: python -m pip install -r "
+    "src/ida_script_mcp/guest_vm/requirements.txt"
 )
 DEFAULT_AGENT_VERSION = "0.1.0"
 

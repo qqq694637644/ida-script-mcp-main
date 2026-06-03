@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
+from ida_script_mcp.disposable_vm import host_controller
 from ida_script_mcp.disposable_vm.host_controller import ControllerState, build_payload
 from ida_script_mcp.payload.disposable_vm import GuestHello, GuestResult, TaskAction, TaskPayload
 
@@ -63,3 +66,41 @@ def test_controller_state_persists_hello_and_result(tmp_path) -> None:
     assert (tmp_path / "payload.json").is_file()
     assert (tmp_path / "result.json").is_file()
     assert (tmp_path / "controller_state.json").is_file()
+
+
+def test_missing_host_runtime_modules_uses_import_names(monkeypatch) -> None:
+    monkeypatch.setattr(
+        host_controller,
+        "_module_available",
+        lambda name: name == "fastapi",
+    )
+
+    assert host_controller.missing_host_runtime_modules(["fastapi", "uvicorn"]) == ["uvicorn"]
+
+
+def test_ensure_host_runtime_modules_installs_missing(monkeypatch) -> None:
+    installed = {"fastapi": False}
+    calls: list[list[str]] = []
+
+    def fake_module_available(name: str) -> bool:
+        return installed.get(name, True)
+
+    def fake_install(names: list[str]) -> None:
+        calls.append(list(names))
+        for name in names:
+            installed[name] = True
+
+    monkeypatch.setattr(host_controller, "_module_available", fake_module_available)
+    monkeypatch.setattr(host_controller, "_install_host_runtime_modules", fake_install)
+
+    host_controller.ensure_host_runtime_modules(["fastapi"])
+
+    assert calls == [["fastapi"]]
+
+
+def test_ensure_host_runtime_modules_respects_disabled_auto_install(monkeypatch) -> None:
+    monkeypatch.setenv("IDA_SCRIPT_MCP_VM_HOST_AUTO_INSTALL", "0")
+    monkeypatch.setattr(host_controller, "_module_available", lambda name: False)
+
+    with pytest.raises(RuntimeError, match="auto-install disabled"):
+        host_controller.ensure_host_runtime_modules(["fastapi"])

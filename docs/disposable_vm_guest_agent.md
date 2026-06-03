@@ -11,6 +11,8 @@ src/ida_script_mcp/disposable_vm/
 
 src/ida_script_mcp/guest_vm/
   agent.py                  # guest-side client agent
+  required_imports.py       # guest snapshot dependency import check
+  requirements.txt          # guest snapshot pip requirements
 
 src/ida_script_mcp/payload/
   disposable_vm.py          # shared JSON protocol models
@@ -19,36 +21,77 @@ src/ida_script_mcp/payload/
 The host remains the only GitHub Actions runner. The guest agent is only a
 client and never registers as a GitHub runner.
 
-## Additional dependencies
+## Machine dependency model
 
-Host controller dependencies:
+Guest VM is the only machine that needs manual dependency preparation before a
+snapshot is taken. HostMachine is not snapshotted, so the host controller checks
+its own host-only runtime imports and installs missing packages before starting.
 
-```powershell
-py -3 -m pip install -e ".[disposable-vm-host]"
-```
+## HostMachine dependencies
 
-This installs:
+No host-only module needs to be baked into a snapshot. The workflow installs the
+project package itself, then the host controller detects these host runtime
+imports and installs them with pip if missing:
 
 ```text
 fastapi>=0.115.0
 uvicorn>=0.30.0
 ```
 
-Guest agent dependencies for the Python 3.11.7 guest snapshot:
+The automatic install can be disabled for debugging with either:
 
 ```powershell
-py -3.11 -m pip install -e ".[disposable-vm-guest]"
+$env:IDA_SCRIPT_MCP_VM_HOST_AUTO_INSTALL = "0"
 ```
 
-This installs:
+or:
+
+```powershell
+--no-auto-install-deps
+```
+
+Manual host preinstall remains possible but is not required:
+
+```powershell
+py -3 -m pip install -e ".[disposable-vm-host]"
+```
+
+## Guest VM snapshot dependencies
+
+Install these inside the guest VM Python 3.11.7 environment before taking the
+clean snapshot:
 
 ```text
 requests>=2.32.0
 ```
 
+Install from the checked-out repository:
+
+```powershell
+py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\requirements.txt
+```
+
+Or install with the package extra:
+
+```powershell
+py -3.11 -m pip install -e ".[disposable-vm-guest]"
+```
+
+Before taking the snapshot, verify the exact imports the guest agent needs:
+
+```powershell
+py -3.11 -m ida_script_mcp.guest_vm.required_imports
+```
+
+The console entry point is also available after package installation:
+
+```powershell
+ida-script-mcp-vm-guest-check-imports
+```
+
 If the guest snapshot cannot install the whole repository package, copy the
-agent plus its package dependencies into the snapshot and install `requests` in
-that Python 3.11.7 environment.
+agent plus `src/ida_script_mcp/guest_vm/requirements.txt` into the snapshot and
+install `requests` in that Python 3.11.7 environment.
 
 ## Host controller example
 

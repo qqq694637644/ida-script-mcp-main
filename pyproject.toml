@@ -77,6 +77,7 @@ ida-script-mcp = "ida_script_mcp.server:main"
 ida-script-mcp-install = "ida_script_mcp.installer:main"
 ida-script-mcp-vm-host-controller = "ida_script_mcp.disposable_vm.host_controller:main"
 ida-script-mcp-vm-guest-agent = "ida_script_mcp.guest_vm.agent:main"
+ida-script-mcp-vm-guest-check-imports = "ida_script_mcp.guest_vm.required_imports:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -92,6 +93,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 ida_script_mcp = [
     "py.typed",
+    "guest_vm/requirements.txt",
     "resources/*.md",
     "resources/idapython/*.md",
     "resources/idapython/docs/*.md",
