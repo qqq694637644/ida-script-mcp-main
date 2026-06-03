@@ -225,6 +225,19 @@ optional /functions name filter
 Full mode keeps the existing heavier checks for `/decompile`, `/xrefs`, rejected
 `/execute`, and 404 behavior, but should only run after basic mode is stable.
 
+### Run 26908467008 attempt 1
+
+```text
+Run URL: https://github.com/qqq694637644/ida-script-mcp-main/actions/runs/26908467008
+Commit: 6fc23a432dceb6a51e169654476ce29015825837
+Inputs: task_action=ida_plugin_api_test, ida_api_test_mode=basic, ida_timeout_seconds=180, run_timeout_seconds=300
+Conclusion: failure
+Artifact ID: 7394878697
+Result summary: failure returned quickly before IDA launch.
+Failure: external harness called _stage() before HEARTBEAT_PATH was initialized, producing NameError `name 'HEARTBEAT_PATH' is not defined`.
+Next action: initialize WORK_DIR/READY_PATH/HEARTBEAT_PATH/RESULT_PATH/IDA_LOG_PATH at module load time and add a generated-payload execution test for missing IDA directory to ensure stage logging works before IDA launch.
+```
+
 ## Update protocol
 
 After every real workflow run, append:

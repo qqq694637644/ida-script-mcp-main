@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from ida_script_mcp.payload.ida_api_test import (
@@ -67,3 +69,29 @@ def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
     assert output.is_file()
     assert output.read_text(encoding="utf-8").startswith("from __future__ import annotations")
     assert isinstance(output, Path)
+
+
+def test_generated_ida_api_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "ida_api_payload.py"
+    script_path.write_text(
+        build_guest_ida_api_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "IDA_PLUGIN_API_TEST_RESULT=" in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "HEARTBEAT_PATH" not in result.stdout
+    assert "validate_inputs_start" in result.stdout

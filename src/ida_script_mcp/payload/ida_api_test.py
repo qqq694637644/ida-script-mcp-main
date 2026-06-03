@@ -111,6 +111,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
     LEGACY_ROOT_SUPPORT_FILES = __LEGACY_ROOT_SUPPORT_FILES_JSON__
     FILES_B64 = __FILES_B64_JSON__
     EXPECTED_SHA256 = __EXPECTED_SHA256_JSON__
+    WORK_DIR = Path(tempfile.mkdtemp(prefix="ida-script-mcp-api-test-"))
+    READY_PATH = WORK_DIR / "ida_ready.json"
+    HEARTBEAT_PATH = WORK_DIR / "heartbeat.ndjson"
+    RESULT_PATH = WORK_DIR / "ida_api_test_result.json"
+    IDA_LOG_PATH = WORK_DIR / "ida.log"
 
     BOOTSTRAP_TEMPLATE = r'''
     from __future__ import annotations
@@ -589,11 +594,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
     def main() -> int:
         ida_dir = Path(IDA_DIR)
         dll_path = Path(DLL_PATH)
-        work_dir = Path(tempfile.mkdtemp(prefix="ida-script-mcp-api-test-"))
-        ready_path = work_dir / "ida_ready.json"
-        heartbeat_path = work_dir / "heartbeat.ndjson"
-        result_path = work_dir / "ida_api_test_result.json"
-        ida_log_path = work_dir / "ida.log"
+        work_dir = WORK_DIR
+        ready_path = READY_PATH
+        heartbeat_path = HEARTBEAT_PATH
+        result_path = RESULT_PATH
+        ida_log_path = IDA_LOG_PATH
         stdout = ""
         stderr = ""
         process = None
