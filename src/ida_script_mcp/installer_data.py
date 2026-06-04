@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
+
 CLIENT_ALIASES: dict[str, str] = {
     "vscode": "VS Code",
     "vs-code": "VS Code",
