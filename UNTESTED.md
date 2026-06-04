@@ -6,7 +6,7 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、多 IDA 实例选择 U005、`/functions` 主要 corner case U006、`/decompile` corner case U007、`/xrefs` corner case U008、`/inspect_address` 系统测试 U009、comment/function_comment 复杂情况 U011、以及 patch_bytes 复杂情况 U013 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、多 IDA 实例选择 U005、`/functions` 主要 corner case U006、`/decompile` corner case U007、`/xrefs` corner case U008、`/inspect_address` 系统测试 U009、comment/function_comment 复杂情况 U011、U012 set_type 复杂情况、以及 patch_bytes 复杂情况 U013 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
@@ -19,10 +19,11 @@ U007 /decompile corner case
 U008 /xrefs corner case
 U009 /inspect_address system test
 U011 comment / function_comment complex
+U012 set_type complex cases
 U013 patch_bytes complex cases
 ```
 
-U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 U006R、U010/U012/U014 apply_changes、installer / client config coverage 开始。U008/U009/U011 已完成，不要重复跑。
+U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 U006R、U010/U014 apply_changes、installer / client config coverage 开始。U008/U009/U011/U012 已完成，不要重复跑。
 
 
 ## 已测项目的专门环境补测
@@ -84,20 +85,6 @@ U007 已在当前 disposable VM + `test1.dll` 基线上通过并移入 `TESTED.m
   rename 非函数地址
   rename import/library/thunk
   flags 不同组合
-  ```
-
-- [ ] **U012 set_type 复杂情况**
-
-  ```text
-  非法 C declaration
-  复杂函数原型
-  stdcall/fastcall/thiscall/vectorcall
-  结构体/枚举/typedef 依赖
-  指针/数组/函数指针
-  已有类型覆盖
-  对非函数地址 set_type
-  ida_typeinf.apply_cdecl 失败路径
-  idc.set_type / idc.SetType fallback 各自真实路径
   ```
 
 - [ ] **U014 partial apply / rollback 语义**

@@ -66,6 +66,7 @@ dirty=true / apply_changes_mutation_flag
 | U009 /inspect_address system test | workflow run `26926388631`, artifact `7401596027` | invalid/missing target, byte_count clamp, data/instruction-middle/unmapped, Unicode comments, repeatable comments, clean read-only state |
 | U011 comment / function_comment complex | workflow run `26926598576`, artifact `7401657997` | repeatable/clear/long/Unicode comments, function comments, non-function error, thunk/library comment, overwrite order |
 | U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
+| U012 set_type complex cases | workflow run `26927371932`, artifact `7401910040` | worker-generated `set_type` ChangeSet, invalid declaration failure, dry-run/destructive replay, final type inspect, dirty replay guard |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -997,6 +998,83 @@ Notes:
 - IDA 8.3 normalized the requested Unicode symbol name to an ASCII fallback; Unicode comments/repeatable comments still round-trip.
 - IDAPython returned `ffffffffffffffff` for a high unmapped address; U009 asserts no metadata and treats all-`ff` bytes as no real mapped bytes.
 - Earlier U009 attempts and fixes are recorded in `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
+
+
+## 2026-06-04 U012：set_type complex cases
+
+Evidence:
+
+- Workflow run: `26927371932`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/test-u012-20260604-904ed5` / `d59cc0cc81c28566d65013c6a99ba98c8ebd86d8`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401910040`
+- Files inspected: `result.json`, workflow run/job status
+
+Inputs:
+
+```text
+task_action=ida_plugin_u012_set_type_complex_test
+ida_timeout_seconds=180
+run_timeout_seconds=1800
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u012_set_type_complex
+payload status=passed
+worker idc_type_aliases.has_SetType=true
+worker idc_type_aliases.has_set_type=false
+worker-generated ChangeSet operation_count=3
+operation_types=[set_type,set_type,set_type]
+operation_decls preserve cdecl -> stdcall -> fastcall/function-pointer order
+invalid C declaration returns status=error and leaves metadata dirty=false
+dry-run status=ok, applied=[], skipped contains all 3 set_type operations
+dry-run leaves target type unchanged
+destructive replay status=ok, applied contains all 3 set_type operations, errors=[]
+/inspect_address after destructive replay reports an inspectable __fastcall prototype with function-pointer argument
+metadata dirty=true after destructive replay via apply_changes_mutation_flag
+follow-up replay while dirty returns status=rejected with message about unsaved changes
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+valid set_type replay for complex function prototypes
+cdecl/stdcall/fastcall-style declarations
+pointer, array, and function-pointer arguments
+ordered overwrite of existing function type through repeated set_type operations
+worker ChangeRecorder explicit_api set_type capture
+GUI apply_changes set_type dry-run and destructive replay
+IDA 8.3 idc.SetType real path; idc.set_type absent in this VM
+invalid C declaration failure path via IDC type API and ida_typeinf.apply_cdecl failure
+dirty database replay guard after destructive apply
+```
+
+Notes:
+
+- U012 payload entry is exposed as `ida_plugin_u012_set_type_complex_test` in `.github/workflows/disposable-vm-guest-agent-smoke.yml`.
+- The worker script is checked in as `src/ida_script_mcp/payload/u012_set_type_complex_worker_script.py`.
+- The generated guest payload logic lives in `src/ida_script_mcp/payload/guest_worker_chain_payload.py` under mode `u012_set_type_complex`.
+- Two failed attempts refined the expected assertions before the passing runs:
+  - `26926180741`: non-function-address assumption was wrong; IDA 8.3 accepted `set_type` at `ea=1` when the database was clean.
+  - `26926363238`: after destructive replay, the follow-up non-function probe was rejected because the GUI database was dirty; this is the correct replay guard behavior and is now asserted.
+- Run `26926517859` first passed U012 at commit `5bc828b6b78b4618aaebba2227f298e928cf4a7f`; run `26927371932` re-ran the same VM test after documentation migration at commit `d59cc0cc81c28566d65013c6a99ba98c8ebd86d8`.
+- Remaining unverified variants include thiscall/vectorcall-specific declarations and struct/enum/typedef dependency declarations.
 
 ## 移入规则
 
