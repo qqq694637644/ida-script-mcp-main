@@ -872,7 +872,13 @@ def main() -> None:
     if args.transport == "stdio":
         mcp.run()
     else:
-        mcp.run(transport="sse", port=args.port)
+        settings = getattr(mcp, "settings", None)
+        if settings is not None and hasattr(settings, "port"):
+            settings.port = args.port
+        try:
+            mcp.run(transport="sse", port=args.port)
+        except TypeError:
+            mcp.run(transport="sse")
 
 
 if __name__ == "__main__":
