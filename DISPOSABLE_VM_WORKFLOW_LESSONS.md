@@ -53,6 +53,9 @@ restore_extra_args_json=[]
 | IDA plugin install | Passed | initial `26903926544`, support-package layout `26907543538` |
 | IDA API basic smoke | Passed | `26908653405` |
 | IDA API full smoke + corner cases | Passed | `26909020426` |
+| IDA API full smoke on merged `main` | Passed | `26921994480`, artifact `7400024008` |
+| `apply_changes` destructive smoke | Passed | `26918788898` |
+| `patch_bytes` destructive smoke | Passed | `26919752930` |
 
 ### Final full-smoke coverage
 
@@ -76,6 +79,24 @@ unknown route -> HTTP 404
 ```
 
 The final payload completed in about 5.8 seconds. It did not hang, and it cleaned up IDA afterward.
+
+Run `26921994480` repeated the full non-destructive smoke after the branch had been merged to `main`:
+
+```text
+workflow conclusion=success
+runner=HostMachine
+controller_state.status=success
+payload_downloaded=true
+guest hostname=DESKTOP-QBSO5C3
+guest result status=completed
+guest result exit_code=0
+IDA plugin instance=8052_test1.dll
+IDA plugin port=13338
+heartbeat reached api_tests_done status=passed
+artifact=disposable-vm-guest-agent-smoke / 7400024008
+```
+
+This confirms the merged `main` baseline still works for the non-destructive plugin HTTP API path. It does not close the remaining V2.3 worker-chain tests: `execute_idapython -> headless worker -> worker-generated ChangeSet -> apply_worker_changes`.
 
 ## Failure lessons and fixes
 
@@ -349,6 +370,7 @@ dedicated action/mode, not default full smoke
 | `26908653405` | `f5e7c7b...` | Success | Basic IDA API smoke passed in about 5.2s. |
 | `26908795266` | `a2ed1d3...` | Success | Full IDA API smoke passed before extra corner checks. |
 | `26909020426` | `bbe8e51...` | Success | Full IDA API smoke passed with extra non-destructive corner checks. |
+| `26921994480` | `e7b00f0...` | Success | Merged `main` full non-destructive IDA API smoke passed; artifact `7400024008`. |
 
 ## Current conclusion
 
@@ -360,4 +382,15 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-The remaining unverified area is destructive database mutation through `apply_changes`, which should be implemented and tested separately from the standard smoke workflow.
+Destructive GUI `/apply_changes` smoke has also been verified separately. The remaining highest-priority unverified area is the full V2.3 MCP worker chain:
+
+```text
+execute_idapython
+-> headless IDA worker
+-> worker-generated ChangeSet
+-> apply_worker_changes dry-run
+-> apply_worker_changes destructive replay
+-> inspect_address verification
+```
+
+Keep this separate from the existing full smoke because the current full smoke calls plugin HTTP endpoints directly and does not prove worker-generated replay.

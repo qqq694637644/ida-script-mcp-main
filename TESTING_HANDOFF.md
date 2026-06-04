@@ -1,98 +1,141 @@
-# Testing handoff: disposable VM, IDA workflow, and V2.3 coverage tracker
+# 测试架构与接手方案
 
 Last updated: 2026-06-04
 
-This file is the handoff entry point for the next AI/code maintainer. It explains the current testing architecture, the tested/untested tracking process, and the next tests to start. Keep this file concise and operational; put detailed failure lessons in `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
+这个文件是给后续 AI 或维护者接手测试工作的入口。它必须回答四个问题：
 
-## Source-of-truth files
+1. 当前项目到底要测哪条架构链路。
+2. 现有 HostMachine / disposable guest VM / IDA workflow 怎么跑。
+3. 已测和未测如何迁移、如何记录证据。
+4. 下一位维护者应该从哪一个测试开始，不要重复踩哪些坑。
 
-| File | Purpose |
+配套文件：
+
+| 文件 | 用途 |
 | --- | --- |
-| `README.md` | Product architecture and supported tools/endpoints. |
-| `DISPOSABLE_VM_WORKFLOW_LESSONS.md` | Project-specific success/failure summary for HostMachine -> disposable VM -> IDA workflow. |
-| `PORTABLE_WORKFLOW_DEVELOPMENT_LESSONS.md` | General workflow-development lessons and reusable rules. |
-| `TESTED.md` | Items that already passed with evidence. |
-| `UNTESTED.md` | Backlog of untested or partially tested items. |
+| `README.md` | 产品架构、MCP tools、IDA 插件 endpoint、隔离执行设计。 |
+| `DISPOSABLE_VM_WORKFLOW_LESSONS.md` | HostMachine -> guest VM -> IDA workflow 的成功/失败经验。 |
+| `PORTABLE_WORKFLOW_DEVELOPMENT_LESSONS.md` | 可迁移到其他仓库的 workflow 开发经验。 |
+| `TESTED.md` | 已经测过的范围和证据。 |
+| `UNTESTED.md` | 未测 backlog。测试通过后从这里移到 `TESTED.md`。 |
 
-## Product test architecture
+## 1. 产品整体测试架构
 
-The V2.3 product boundary is:
+V2.3 的核心不是“能不能调用 IDA 插件”，而是下面这条安全边界是否成立：
 
 ```text
-AI client / MCP client
+AI / MCP client
   -> ida_script_mcp.server
-    -> GUI plugin structured read endpoints
-    -> isolated headless IDA worker for arbitrary/custom IDAPython
-    -> apply_worker_changes -> GUI plugin /apply_changes replay
+      -> 结构化只读请求：转发到 GUI IDA 插件 endpoint
+      -> 任意/custom IDAPython：进入 headless isolated worker
+      -> worker 产出 result.json 和可选 ChangeSet
+      -> apply_worker_changes：把 ChangeSet 显式回放到 GUI 插件 /apply_changes
+  -> GUI IDA database 只在显式 apply 时被写入
 ```
 
-Key safety rules to preserve while testing:
+因此测试也要分成三层，不要混在一起：
 
-- Public `execute_idapython` must use isolated worker execution only. It must not fall back to GUI `/execute`.
-- GUI `/execute` is rejected by default with HTTP 410 unless the explicit development escape hatch is enabled.
-- The GUI database is read live through structured endpoints, but arbitrary user code runs in a copied saved IDB/I64 inside a headless worker.
-- Worker-side changes become a structured `ChangeSet`; real GUI mutation happens only through `apply_worker_changes` / `/apply_changes`.
-- `/apply_changes` defaults to dry-run and must reject dirty/unsaved/unknown identity/fingerprint mismatch cases.
+| 层 | 要证明什么 | 典型入口 | 是否会写 GUI 数据库 |
+| --- | --- | --- | --- |
+| GUI 插件只读层 | `/metadata`、`/functions`、`/decompile`、`/xrefs`、`/inspect_address` 能稳定读 live IDA | guest payload 直接 HTTP 调插件 | 否 |
+| 隔离 worker 层 | `execute_idapython` 会复制 saved IDB/I64 并启动 headless IDA worker，超时/崩溃有结构化状态 | MCP server `execute_idapython` | worker copy only |
+| 显式回放层 | worker 生成的 `ChangeSet` 只能通过 `apply_worker_changes` / GUI `/apply_changes` 回放，且 fingerprint / dirty state 拦截有效 | MCP server `apply_worker_changes` 或 GUI `/apply_changes` | 仅 `dry_run=false` 时写 |
 
-Important runtime modules:
+安全规则必须一直保持：
 
-| Layer | Files | What to inspect first |
+```text
+Public execute_idapython 不允许 fallback 到 GUI /execute
+GUI /execute 默认 HTTP 410 rejected
+/apply_changes 默认 dry_run=true
+fingerprint 不匹配必须 rejected
+dirty/unsaved/dirty unknown 必须 rejected
+worker timeout 必须杀进程树
+worker 进程隔离不是完整安全沙箱，不能把它描述成强沙箱
+```
+
+## 2. 代码模块地图
+
+接手时先看这些文件，不要全仓库乱搜：
+
+| 模块 | 文件 | 重点 |
 | --- | --- | --- |
-| MCP server | `src/ida_script_mcp/server.py` | tool schema, instance resolution, metadata calls, `execute_idapython`, `apply_worker_changes` |
-| GUI plugin | `src/ida_script_mcp/ida_plugin.py` | HTTP endpoints, metadata/fingerprint/dirty state, `/apply_changes`, `/execute` rejection |
-| Isolated execution | `src/ida_script_mcp/isolated_manager.py`, `worker_runner.py`, `execution.py` | DB copy, IDA process launch, timeout/kill, result classification |
-| Change protocol | `change_protocol.py`, `change_recorder.py` | `ChangeSet`, fingerprint matching, recorder monkeypatches, `mcp_changes` API |
-| Disposable VM | `disposable_vm/host_controller.py`, `guest_vm/agent.py`, `payload/ida_api_test.py` | host/guest protocol, dynamic payloads, IDA bootstrap, artifacts |
+| MCP server | `src/ida_script_mcp/server.py` | tool schema、instance 解析、`execute_idapython`、`apply_worker_changes` |
+| GUI IDA 插件 | `src/ida_script_mcp/ida_plugin.py` | HTTP handler、metadata、dirty state、fingerprint、`/apply_changes`、`/execute` 410 |
+| 隔离执行 manager | `src/ida_script_mcp/isolated_manager.py` | DB copy、IDA executable 发现、worker launch、timeout、kill tree、result 分类 |
+| worker runner | `src/ida_script_mcp/worker_runner.py` | IDA batch/auto_wait、确认打开 copied DB、安装 recorder、写 result/changes |
+| 执行器 | `src/ida_script_mcp/execution.py` | Python source 编译执行、soft timeout、stdout/stderr 捕获 |
+| 变更协议 | `src/ida_script_mcp/change_protocol.py` | `ChangeSet`、operation schema、fingerprint matching |
+| 变更记录 | `src/ida_script_mcp/change_recorder.py` | monkeypatch IDAPython 写 API、`mcp_changes` explicit API |
+| Host 主控 | `src/ida_script_mcp/disposable_vm/host_controller.py` | `/hello`、`/payload`、`/log`、`/result`、artifact 状态 |
+| Guest agent | `src/ida_script_mcp/guest_vm/agent.py` | guest 主动连接 host、下载 payload、执行并回传结果 |
+| IDA API payload | `src/ida_script_mcp/payload/ida_api_test.py` | 安装插件、启动 IDA、外部 HTTP 测试、heartbeat/result |
 
-## Disposable VM workflow architecture
+## 3. Disposable VM workflow 总架构
 
-The real integration workflow is external-machine based:
+当前真实集成测试不是普通 GitHub-hosted CI，而是 HostMachine 自托管 runner 驱动 VMware guest：
 
 ```text
 GitHub workflow_dispatch
   -> HostMachine self-hosted Windows runner
-    -> checkout repository
-    -> install project package
-    -> start host controller
-      -> optional VMware restore of guest snapshot
-      -> wait for guest /hello
-      -> serve dynamic payload
-      -> receive guest logs and result
-    -> upload controller result directory as artifact
+      -> checkout repository
+      -> py -3 -m pip install -e .
+      -> start host controller on 0.0.0.0:8766
+      -> optional: run C:\Users\alion\Scripts\vmware_restore_test1.py --gui
+      -> wait guest agent POST /hello
+      -> serve dynamic payload at /payload/{job_id}
+      -> receive guest /log/{job_id}
+      -> receive guest /result/{job_id}
+      -> upload $RUNNER_TEMP\ida-script-mcp-disposable-vm artifact
 ```
 
-Guest VM side:
+Guest VM 侧流程：
 
 ```text
-guest agent starts from snapshot
-  -> POST /hello to host controller
-  -> GET /payload/{job_id}
-  -> execute noop / command / python_script payload
+guest snapshot boots
+  -> guest agent starts
+  -> POST http://192.168.1.249:8766/hello
+  -> GET  http://192.168.1.249:8766/payload/{job_id}
+  -> run payload: noop / command / python_script
   -> POST /log/{job_id}
   -> POST /result/{job_id}
 ```
 
-IDA API payload side:
+IDA payload 侧流程：
 
 ```text
-guest python payload
-  -> install/update IDA plugin files in guest IDA user plugin dir
+python_script payload in guest
+  -> write plugin files to %APPDATA%\Hex-Rays\IDA Pro\plugins
   -> remove legacy root-level support files
-  -> launch IDA 8.3 against C:\Users\alion\Desktop\test1.dll
-  -> run IDA bootstrap with -S
-  -> wait for ida_ready.json
-  -> call plugin HTTP endpoints from outside IDA process
-  -> write heartbeat.ndjson and result JSON
-  -> terminate IDA in cleanup
+  -> start C:\Users\alion\Desktop\IDAPro8.3\ida64.exe -A -S<bootstrap>
+  -> open C:\Users\alion\Desktop\test1.dll into temp test1.i64
+  -> bootstrap waits ida_auto.auto_wait()
+  -> bootstrap starts IDA-Script-MCP plugin server
+  -> bootstrap writes ida_ready.json with base_url / instance_id / database_path
+  -> payload outside IDA calls http://127.0.0.1:13338 endpoints
+  -> payload writes heartbeat.ndjson and ida_api_test_result.json/result.json
+  -> payload terminates IDA and returns exit_code to host
 ```
 
-Current stable workflow file:
+## 4. 当前可用 workflow 和输入
+
+Workflow 文件：
 
 ```text
 .github/workflows/disposable-vm-guest-agent-smoke.yml
 ```
 
-Current stable manual-dispatch inputs for full non-destructive smoke:
+可用 `task_action`：
+
+```text
+noop
+command
+python_script
+ida_plugin_install
+ida_plugin_api_test
+ida_plugin_apply_changes_test
+```
+
+### 非破坏性 full smoke
 
 ```text
 task_action=ida_plugin_api_test
@@ -110,7 +153,9 @@ restore_gui=true
 restore_extra_args_json=[]
 ```
 
-Current stable manual-dispatch inputs for destructive `apply_changes` smoke:
+它验证的是 GUI 插件 HTTP API，不验证完整 MCP `execute_idapython` worker replay 主链路。
+
+### destructive apply_changes smoke
 
 ```text
 task_action=ida_plugin_apply_changes_test
@@ -128,161 +173,219 @@ restore_gui=true
 restore_extra_args_json=[]
 ```
 
-## Tested / untested tracking protocol
+它验证 GUI `/apply_changes`，包括 dry-run、bad fingerprint、destructive apply、dirty rejection。它仍然不等于 U001，因为它没有通过 MCP `execute_idapython` 生成 worker `ChangeSet`。
 
-Use the root tracker files exactly like a work queue:
+## 5. 当前最新一次测试结果
 
-1. Pick one item from `UNTESTED.md`. Prefer the current priority set U001-U003 unless blocked.
-2. Run the smallest test that genuinely proves that item. For external-machine tests, record workflow run ID and artifact names.
-3. If the test passes, remove the item from `UNTESTED.md` and append it to `TESTED.md` with evidence.
-4. If the test fails, leave the item in `UNTESTED.md`; add the failure signature, root cause, and fix/next step to `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
-5. Do not move partial results into `TESTED.md`; write them as notes under the original `UNTESTED.md` item or in the lessons file.
-6. Do not call a workflow “passed” unless GitHub Actions result and guest `result.json` agree.
+刚跑完的 baseline：
 
-Use this evidence template when moving an item to `TESTED.md`:
+| 字段 | 值 |
+| --- | --- |
+| Workflow run | `26921994480` |
+| Workflow | `Disposable VM guest agent smoke` |
+| Branch / commit | `main` / `e7b00f0553c7b53437f55bda9f02b7c7497f1ddf` |
+| Job | `Host controller and guest agent smoke` |
+| Runner | `HostMachine` |
+| Conclusion | `success` |
+| Artifact | `disposable-vm-guest-agent-smoke`, artifact id `7400024008` |
+| Host controller state | `status=success`, `payload_downloaded=true` |
+| Guest | `DESKTOP-QBSO5C3`, Python `3.11.7` |
+| Guest result | `status=completed`, `exit_code=0` |
+| IDA plugin | instance `8052_test1.dll`, port `13338` |
+| Final heartbeat | `api_tests_done`, `status=passed`; cleanup reached `ida_terminate_done` |
+
+该 run 验证：
+
+```text
+/health
+/metadata
+/functions
+/functions limit=1
+/functions name filter
+/functions offset beyond total
+/decompile
+/decompile invalid address
+/xrefs to
+/xrefs from
+/xrefs invalid direction structured error
+/xrefs invalid kind structured error
+/execute -> HTTP 410 status=rejected
+unknown route -> HTTP 404
+```
+
+该 run **没有** 验证：
+
+```text
+execute_idapython -> headless worker -> worker-generated ChangeSet -> apply_worker_changes
+worker hard timeout / kill process tree
+worker crash/result-missing/recorder-error matrix
+```
+
+所以 U001-U003 仍保留在 `UNTESTED.md`。
+
+## 6. 已测/未测迁移规则
+
+`UNTESTED.md` 是待办队列，`TESTED.md` 是证据账本。
+
+迁移规则：
+
+```text
+从 UNTESTED.md 选择一项
+-> 运行最小可证明测试
+-> 查 GitHub run conclusion
+-> 查 artifact JSON，不只看绿色勾
+-> 如果通过：从 UNTESTED.md 删除该项，并追加到 TESTED.md
+-> 如果失败：保留在 UNTESTED.md，并把失败写入 DISPOSABLE_VM_WORKFLOW_LESSONS.md
+```
+
+一项只能在满足这些条件时移入 `TESTED.md`：
+
+1. 有 run ID / commit / branch / artifact id。
+2. artifact 里能看到 `controller_state.json`、`result.json` 或 payload 自己的结果文件。
+3. 写清楚具体断言，不只写“workflow 绿了”。
+4. destructive 测试说明是否只作用于临时 `.i64`。
+5. 对 U001 这类链路测试，必须证明每个中间环节都发生了：metadata、DB copy、worker、changes、dry-run、destructive apply、inspect。
+
+证据模板：
 
 ```markdown
-### YYYY-MM-DD - Uxxx title
+### YYYY-MM-DD - Uxxx 标题
 
 Evidence:
-- Workflow run: `<run_id>` / job `<job_name>` / attempt `<n>`
+- Workflow run: `<run_id>` attempt `<n>`
 - Commit/branch: `<sha>` / `<branch>`
-- Inputs: `<important workflow inputs>`
-- Artifacts: `<artifact name>` contains `<files inspected>`
+- Inputs: `<关键 inputs>`
+- Artifact: `<artifact name>` / `<artifact id>`
+- Files inspected: `controller_state.json`, `result.json`, `<payload result>`
 
 Assertions:
-- `<status field or HTTP status>`
-- `<database dirty/fingerprint condition>`
-- `<process cleanup condition>`
+- `<controller_state.status>`
+- `<guest result status / exit_code>`
+- `<endpoint/tool response>`
+- `<database dirty/fingerprint/process cleanup>`
 
 Notes:
-- `<risks or follow-up>`
+- `<风险和后续>`
 ```
 
-## Next tests to start
+## 7. 下一步真正该测什么
 
-Start with these, in order:
+优先级最高的是 `UNTESTED.md` 中 U001-U003。
 
-### 1. U001 full V2.3 worker replay chain
+### U001：完整 V2.3 主链路
 
-Goal:
+目标不是再测 `/apply_changes`，而是证明 worker 产出的 `ChangeSet` 能经 MCP 层回放：
 
 ```text
-execute_idapython
--> headless IDA worker
--> ChangeRecorder generates ChangeSet
--> apply_worker_changes dry-run
--> apply_worker_changes destructive replay
--> inspect_address verifies GUI mutation
+MCP execute_idapython
+  -> GUI /metadata
+  -> saved clean database fingerprint
+  -> copy saved IDB/I64
+  -> launch headless IDA worker
+  -> worker 执行用户 IDAPython
+  -> ChangeRecorder 生成 changes.json
+  -> MCP apply_worker_changes dry-run
+  -> MCP apply_worker_changes dry_run=false
+  -> GUI /apply_changes
+  -> /inspect_address 验证 GUI mutation
 ```
 
-Why this is first: real `/apply_changes` has been proven, but the core V2.3 claim also requires proving that worker-generated changes can be replayed through the MCP layer.
-
-Current gap: the existing disposable VM workflow can call plugin HTTP endpoints and run `apply_changes`, but it does not yet directly run the MCP `execute_idapython` tool path with current repository code inside the guest.
-
-Suggested implementation approach:
+建议实现方式：
 
 ```text
-host workflow generates a new python_script payload
-payload installs current plugin files
-payload also makes current src/ida_script_mcp importable in the guest work dir
-payload launches GUI IDA + plugin as ida_api_test does
-payload sets IDA_SCRIPT_MCP_IDA_PATH to guest IDA idat/ida executable
-payload calls ida_script_mcp.server.execute_idapython directly or through a real MCP client
-worker script uses mcp_changes.rename/comment/patch_bytes or IDA monkeypatched APIs
-payload calls apply_worker_changes first with dry_run=true
-payload calls apply_worker_changes with dry_run=false
-payload calls /inspect_address to verify changes
-payload records result.json, heartbeat.ndjson, stdout/stderr tails
+新增一个 guest python_script payload 或扩展现有 ida_api_test payload
+payload 复用现有插件安装和 IDA bootstrap 逻辑
+payload 启动 GUI IDA 插件，拿到 base_url/port/database_path
+payload 设置 IDA_SCRIPT_MCP_IDA_PATH 指向 guest IDA idat64/ida64
+payload 让 src/ida_script_mcp 在 guest 可 import
+payload 直接调用 ida_script_mcp.server.execute_idapython 或真实 MCP client
+worker 代码调用 mcp_changes.rename/comment/patch_bytes 或 IDA monkeypatch API
+payload 保存 execute_result.json 和 changes.json 摘要
+payload 调 apply_worker_changes dry-run 并确认不改 GUI
+payload 调 apply_worker_changes dry_run=false 并确认 GUI 改动可 inspect
+payload 最终写 v23_worker_chain_result.json
 ```
 
-Do not mark U001 tested until the artifact proves both `changes` were produced by worker execution and GUI state changed only after explicit apply.
-
-### 2. U002 worker hard timeout / kill process tree
-
-Goal:
+U001 通过的最低断言：
 
 ```text
-execute_idapython(code='while True: pass', timeout_seconds=<small>)
+execute_result.status == ok
+execute_result.isolated == true
+execute_result.job_id 非空
+execute_result.changes 至少包含一个 operation
+apply dry-run status == ok 且 applied=[]
+inspect dry-run 后 GUI 未变
+apply destructive status == ok 且 applied 非空
+inspect destructive 后 GUI 已变
+metadata destructive 后 dirty == true 或 apply_changes_mutation_flag == true
+```
+
+### U002：worker hard timeout / kill process tree
+
+目标：
+
+```text
+execute_idapython(code='while True: pass', timeout_seconds=1~3)
 -> result.status == timeout
 -> hard_timeout == true
 -> killed == true
--> no leftover worker IDA/idat process
+-> worker_exit_code/worker_pid 有记录
+-> 无残留 idat64/ida64 worker 进程
+-> GUI 数据库不被修改
 ```
 
-Also inspect artifacts: stdout/stderr tails, result metadata, and job dir retention behavior if `IDA_SCRIPT_MCP_KEEP_JOBS=1` is used.
+建议作为独立 `task_action` 或独立 payload mode，不要和 U001 放同一轮，避免死循环/kill 干扰主链路结果。
 
-### 3. U003 worker failure-state matrix
+### U003：worker 异常状态矩阵
 
-Goal: construct real worker cases for:
+至少构造：
 
 ```text
-worker_start_error
-worker_crashed
-worker_result_missing
-recorder_error
-source_error
-rejected
+worker_start_error: IDA_SCRIPT_MCP_IDA_PATH 指向不存在路径
+worker_crashed: worker 进程非零退出且没有有效 ok result
+worker_result_missing: worker 不产生 result.json
+recorder_error: 真实 IDA recorder 安装或记录异常
+source_error: script_path/source 无效
+rejected: GUI dirty / dirty unknown / identity missing
 ```
 
-Keep this as a separate mode from U001/U002 so a crash test does not hide the result of the main chain.
+这个测试应该输出一个矩阵 JSON：
 
-## Existing workflow coverage and limits
+```json
+{
+  "worker_start_error": "passed",
+  "worker_crashed": "passed",
+  "worker_result_missing": "passed",
+  "recorder_error": "passed",
+  "source_error": "passed",
+  "rejected": "passed"
+}
+```
 
-The current workflow supports these `task_action` values:
+## 8. 失败排查顺序
+
+不要一看到失败就改 payload 或插件。按边界排查：
 
 ```text
-noop
-command
-python_script
-ida_plugin_install
-ida_plugin_api_test
-ida_plugin_apply_changes_test
+1. GitHub 是否创建 workflow run？没有 -> workflow_dispatch/indexing/ref 问题
+2. runner 是否是 HostMachine？不是 -> self-hosted runner 路由问题
+3. checkout/install 是否成功？失败 -> Python/package/env 问题
+4. host controller 是否启动？失败 -> fastapi/uvicorn/port 问题
+5. vmware_restore.json returncode 是否 0？失败 -> snapshot/VMware 问题
+6. controller_state.hello 是否非空？空 -> guest agent 未启动/网络不通
+7. payload_downloaded 是否 true？false -> guest 没拿到任务
+8. payload result 是否 completed exit_code=0？非 0 -> payload 内部失败
+9. ida_ready.json 是否出现？没有 -> IDA 启动/bootstrap/plugin 问题
+10. heartbeat 最后一项是什么？定位到具体阶段
+11. responses/checks 哪个失败？定位 endpoint/tool
+12. cleanup 是否执行？看 ida_terminate_done / 残留进程
 ```
 
-Use these for environment sanity checks and regression of already-proven behaviors. They are not enough by themselves to close U001 because they bypass MCP `execute_idapython` and call the plugin HTTP API directly.
+## 9. 接手者的第一天操作建议
 
-## Artifact checklist for external-machine runs
-
-Every external-machine run should produce or preserve:
-
-```text
-controller_state.json
-hello.json
-payload.json
-guest_logs.ndjson
-result.json
-vmware_restore.json when restore is used
-ida_api_test_result.json for IDA API payloads
-heartbeat.ndjson for IDA payloads
-ida_ready.json for IDA bootstrap
-stdout/stderr tails
-```
-
-Debug order when a run fails:
-
-```text
-1. Was a workflow run created?
-2. Was HostMachine runner allocated?
-3. Did checkout/install pass?
-4. Did host controller start?
-5. Did VMware restore return 0?
-6. Did guest /hello arrive?
-7. Did guest download payload?
-8. Did payload launch IDA?
-9. Did ida_ready.json appear?
-10. Which heartbeat stage was last?
-11. Did guest POST /result?
-12. Did workflow upload artifact?
-```
-
-## Rules for future AI maintainers
-
-- Prefer minimal, evidence-driven changes. Do not add a broad workflow mode before a small targeted payload proves the failure domain.
-- Keep destructive tests opt-in and never make them the default workflow mode.
-- Keep test driver code outside the IDA process where possible; let IDA bootstrap only start plugin and write readiness.
-- Use short layered timeouts and heartbeat stages before adding more coverage.
-- Treat HostMachine paths and guest snapshot paths as environment-specific; document every assumption.
-- If workflow dispatch fails with 404/422, check GitHub workflow indexing before changing YAML.
-- If the guest never connects, debug restore/agent startup before payload code.
-- If payload hangs after IDA launch, inspect `heartbeat.ndjson`, `ida_ready.json`, and IDA log tail before changing plugin code.
+1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
+2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
+3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
+4. 如果要推进核心覆盖，直接做 U001 payload。
+5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
+6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。
