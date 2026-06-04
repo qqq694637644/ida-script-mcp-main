@@ -42,6 +42,10 @@ MCP_SERVER_NAME = "ida-script-mcp"
 PLUGIN_NAME = "ida_script_mcp"
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 IDA_PLUGIN_FILE = os.path.join(SCRIPT_DIR, "ida_plugin.py")
+IDA_PLUGIN_SUPPORT_FILES = {
+    "protocol.py": "ida_script_mcp_protocol.py",
+    "execution.py": "ida_script_mcp_execution.py",
+}
 SERVER_MODULE = "ida_script_mcp.server"
 
 
@@ -106,27 +110,58 @@ def install_ida_plugin(*, uninstall: bool = False, quiet: bool = False) -> bool:
 
     ida_plugin_folder = os.path.join(ida_folder, "plugins")
     plugin_destination = os.path.join(ida_plugin_folder, f"{PLUGIN_NAME}.py")
+    support_destinations = [
+        os.path.join(ida_plugin_folder, destination)
+        for destination in IDA_PLUGIN_SUPPORT_FILES.values()
+    ]
 
     if uninstall:
-        if os.path.lexists(plugin_destination):
-            _remove_path(plugin_destination)
+        removed_paths = [
+            path
+            for path in [plugin_destination, *support_destinations]
+            if os.path.lexists(path)
+        ]
+        for path in removed_paths:
+            _remove_path(path)
+
+        if removed_paths:
             if not quiet:
                 print("Uninstalled IDA Pro plugin")
-                print(f"  Removed: {plugin_destination}")
+                for path in removed_paths:
+                    print(f"  Removed: {path}")
         elif not quiet:
             print("IDA plugin not installed, nothing to uninstall")
         return True
 
-    if not os.path.exists(IDA_PLUGIN_FILE):
-        print(f"Error: Plugin file not found: {IDA_PLUGIN_FILE}")
+    install_files = [(IDA_PLUGIN_FILE, plugin_destination)]
+    install_files.extend(
+        (
+            os.path.join(SCRIPT_DIR, source_filename),
+            os.path.join(ida_plugin_folder, destination_filename),
+        )
+        for source_filename, destination_filename in IDA_PLUGIN_SUPPORT_FILES.items()
+    )
+
+    missing_files = [source for source, _ in install_files if not os.path.exists(source)]
+    if missing_files:
+        for source in missing_files:
+            print(f"Error: Plugin file not found: {source}")
         return False
 
     os.makedirs(ida_plugin_folder, exist_ok=True)
 
-    if _install_link_or_copy(IDA_PLUGIN_FILE, plugin_destination):
+    changed_paths = [
+        destination
+        for source, destination in install_files
+        if _install_link_or_copy(source, destination)
+    ]
+
+    if changed_paths:
         if not quiet:
             print("Installed IDA Pro plugin (IDA restart required)")
             print(f"  Plugin: {plugin_destination}")
+            for destination in support_destinations:
+                print(f"  Support: {destination}")
             print("\n  To enable: Edit -> Plugins -> IDA-Script-MCP (Ctrl+Alt+S)")
     elif not quiet:
         print("IDA plugin already up to date")

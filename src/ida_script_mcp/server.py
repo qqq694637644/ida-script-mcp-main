@@ -22,10 +22,21 @@ import http.client
 import json
 import logging
 import os
+import socket
+import time
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+
+from .protocol import (
+    DEFAULT_EXECUTE_TIMEOUT_SECONDS,
+    MAX_EXECUTE_TIMEOUT_SECONDS,
+    PLUGIN_RESPONSE_TIMEOUT_MARGIN_SECONDS,
+    ExecuteRequest,
+    ExecuteResult,
+    ExecutionError,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -60,6 +71,18 @@ DEFAULT_ERROR_HINT = (
     "Make sure IDA Pro is running with the IDA-Script-MCP plugin started. "
     "In IDA, use Edit -> Plugins -> IDA-Script-MCP (Ctrl+Alt+S)."
 )
+
+
+class IdaPluginResponseTimeout(RuntimeError):
+    """Raised when the IDA plugin does not return an HTTP response in time."""
+
+    def __init__(self, host: str, port: int, timeout: float):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        super().__init__(
+            f"IDA plugin at {host}:{port} did not respond within {timeout:g} seconds"
+        )
 
 
 class InstanceTargetInput(BaseModel):
@@ -176,6 +199,13 @@ class GetXrefsInput(InstanceTargetInput):
 class ExecuteScriptInput(InstanceTargetInput):
     """Input for execute_idapython."""
 
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",
+        strict=True,
+    )
+
     code: Optional[str] = Field(
         default=None,
         description=(
@@ -190,10 +220,35 @@ class ExecuteScriptInput(InstanceTargetInput):
             "script_path."
         ),
     )
-    capture_output: bool = Field(
+    capture_output: StrictBool = Field(
         default=True,
         description="Whether to capture stdout and stderr from script execution.",
     )
+    timeout_seconds: int = Field(
+        default=DEFAULT_EXECUTE_TIMEOUT_SECONDS,
+        ge=1,
+        le=MAX_EXECUTE_TIMEOUT_SECONDS,
+        description=(
+            "Soft Python-bytecode timeout for the script. Native IDA/C extension calls may "
+            "not be interruptible until control returns to Python."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_execute_request(self) -> "ExecuteScriptInput":
+        self.to_execute_request()
+        return self
+
+    def to_execute_request(self) -> ExecuteRequest:
+        """Convert MCP input into the shared strict plugin request model."""
+        return ExecuteRequest.model_validate(
+            {
+                "code": self.code,
+                "script_path": self.script_path,
+                "capture_output": self.capture_output,
+                "timeout_seconds": self.timeout_seconds,
+            }
+        )
 
 
 def get_ida_host() -> str:
@@ -403,6 +458,8 @@ def make_ida_request(
         if not raw_data:
             return {}
         return json.loads(raw_data)
+    except (TimeoutError, socket.timeout) as exc:
+        raise IdaPluginResponseTimeout(effective_host, effective_port, timeout) from exc
     except Exception as exc:
         raise RuntimeError(
             f"Failed to connect to IDA plugin at {effective_host}:{effective_port}: {exc}"
@@ -636,29 +693,48 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
         - ``execute_idapython({"code": "result = len(list(idautils.Functions()))"})``
         - ``execute_idapython({"script_path": "./scripts/rename_stubs.py", "instance_id": "sample.exe"})``
     """
-    if not params.code and not params.script_path:
-        return _tool_error("Provide either 'code' or 'script_path'.")
-    if params.code and params.script_path:
-        return _tool_error("Provide only one of 'code' or 'script_path' for execute_idapython.")
-
     port, resolved_instance_id, label = resolve_target(params)
     if port is None:
         return _tool_error(label, hint=DEFAULT_ERROR_HINT)
+
+    execute_request = params.to_execute_request()
+    plugin_response_timeout = (
+        float(execute_request.timeout_seconds) + PLUGIN_RESPONSE_TIMEOUT_MARGIN_SECONDS
+    )
+    started_at = time.monotonic()
 
     try:
         result = make_ida_request(
             "/execute",
             method="POST",
-            data={
-                "code": params.code,
-                "script_path": params.script_path,
-                "capture_output": params.capture_output,
-            },
+            data=execute_request.model_dump(),
             port=port,
+            timeout=plugin_response_timeout,
         )
         result.setdefault("instance_id", resolved_instance_id)
         result.setdefault("port", port)
         return result
+    except IdaPluginResponseTimeout:
+        duration_seconds = max(0.0, time.monotonic() - started_at)
+        return ExecuteResult(
+            status="plugin_response_timeout",
+            result=None,
+            stdout="",
+            stderr="",
+            error=ExecutionError(
+                type="PluginResponseTimeout",
+                message=(
+                    "IDA plugin did not respond within "
+                    f"{plugin_response_timeout:g} seconds. The script may still be "
+                    "running inside IDA."
+                ),
+                traceback=None,
+            ),
+            duration_seconds=duration_seconds,
+            timeout_seconds=execute_request.timeout_seconds,
+            instance_id=resolved_instance_id,
+            port=port,
+        ).model_dump(mode="json")
     except Exception as exc:
         return _tool_error(str(exc), hint=DEFAULT_ERROR_HINT, instance_id=resolved_instance_id, port=port)
 
