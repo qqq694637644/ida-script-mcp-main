@@ -804,21 +804,6 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
             isolated=True,
         ).model_dump(mode="json")
 
-    try:
-        gui_context = make_ida_request("/metadata", method="GET", port=port, timeout=10.0)
-    except Exception as exc:
-        return ExecuteResult(
-            status="source_error",
-            result=None,
-            stdout="",
-            stderr="",
-            error=ExecutionError(type=type(exc).__name__, message=str(exc), traceback=None),
-            timeout_seconds=execute_request.timeout_seconds,
-            instance_id=resolved_instance_id,
-            port=port,
-            isolated=True,
-        ).model_dump(mode="json")
-
     instances = list_instances()
     instance_info = instances.get(resolved_instance_id or "")
     if instance_info is None:
@@ -867,6 +852,21 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
             "GuiExecutableUnexpected",
             f"Expected current GUI executable to be ida64.exe, got: {gui_executable_path}",
         )
+
+    try:
+        gui_context = make_ida_request("/metadata", method="GET", port=port, timeout=10.0)
+    except Exception as exc:
+        return ExecuteResult(
+            status="source_error",
+            result=None,
+            stdout="",
+            stderr="",
+            error=ExecutionError(type=type(exc).__name__, message=str(exc), traceback=None),
+            timeout_seconds=execute_request.timeout_seconds,
+            instance_id=resolved_instance_id,
+            port=port,
+            isolated=True,
+        ).model_dump(mode="json")
 
     gui_context = dict(gui_context)
     gui_context["gui_pid"] = gui_pid

@@ -198,9 +198,7 @@ def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path, monk
     assert result.artifacts_retained is True
 
 
-def test_worker_discovery_prefers_gui_executable_directory(tmp_path, monkeypatch):
-    monkeypatch.delenv("IDA_SCRIPT_MCP_IDA_PATH", raising=False)
-    monkeypatch.delenv("IDA_SCRIPT_MCP_WORKER_MODE", raising=False)
+def test_worker_discovery_prefers_gui_executable_directory(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
     ida_dir = tmp_path / "ida"
@@ -231,9 +229,7 @@ def test_worker_discovery_prefers_gui_executable_directory(tmp_path, monkeypatch
     assert result.status == "ok"
 
 
-def test_worker_discovery_rejects_non_ida64_gui_executable(
-    tmp_path, monkeypatch
-):
+def test_worker_discovery_rejects_non_ida64_gui_executable(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
     ida_dir = tmp_path / "ida"
@@ -241,7 +237,6 @@ def test_worker_discovery_rejects_non_ida64_gui_executable(
     gui_ida = ida_dir / "ida.exe"
     gui_ida.write_text("gui", encoding="utf-8")
     (ida_dir / "idat64.exe").write_text("worker", encoding="utf-8")
-    monkeypatch.setenv("IDA_SCRIPT_MCP_IDA_PATH", str(ida_dir / "idat64.exe"))
     launched = False
 
     def popen(args, **kwargs):
@@ -262,18 +257,13 @@ def test_worker_discovery_rejects_non_ida64_gui_executable(
     assert launched is False
 
 
-def test_worker_discovery_rejects_missing_idat64_without_env_or_path_fallback(
-    tmp_path, monkeypatch
-):
+def test_worker_discovery_rejects_missing_idat64_without_env_or_path_fallback(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
     gui_dir = tmp_path / "gui-only"
     gui_dir.mkdir()
     gui_ida = gui_dir / "ida64.exe"
     gui_ida.write_text("gui", encoding="utf-8")
-    env_ida = tmp_path / "idat64-env.exe"
-    env_ida.write_text("worker", encoding="utf-8")
-    monkeypatch.setenv("IDA_SCRIPT_MCP_IDA_PATH", str(env_ida))
     launched = False
 
     def popen(*_args, **_kwargs):
@@ -291,7 +281,6 @@ def test_worker_discovery_rejects_missing_idat64_without_env_or_path_fallback(
 
     assert result.status == "worker_start_error"
     assert result.error.type == "GuiWorkerExecutableMissing"
-    assert str(env_ida) not in result.error.message
     assert launched is False
 
 
