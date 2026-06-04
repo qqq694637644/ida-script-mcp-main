@@ -202,6 +202,9 @@ def test_build_guest_u010_rename_complex_script_contains_checked_sources() -> No
     assert "non_function_address" in script
     assert "import_library_thunk" in script
     assert "force_duplicate_existing_function_name" in script
+    assert "ida-script-mcp-u010-kept-i64" in script
+    assert "kept_database" in script
+    assert "kept_i64_dir" in script
     assert "SN_FORCE" in script
     assert "SN_NOCHECK" in script
     assert "__PLUGIN_FILES_B64_JSON__" not in script
