@@ -11,6 +11,9 @@ from ida_script_mcp.payload.ida_api_test import (
     DEFAULT_IDA_TIMEOUT_SECONDS,
     build_guest_ida_api_test_script,
 )
+from ida_script_mcp.payload.ida_worker_chain_test import (
+    build_guest_ida_worker_chain_test_script,
+)
 from ida_script_mcp.payload.ida_u004_real_mcp_client_test import (
     build_guest_u004_real_mcp_client_test_script,
 )
@@ -23,8 +26,8 @@ from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
 from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
     build_guest_u007_decompile_corner_case_test_script,
 )
-from ida_script_mcp.payload.ida_worker_chain_test import (
-    build_guest_ida_worker_chain_test_script,
+from ida_script_mcp.payload.ida_u013_patch_bytes_complex_test import (
+    build_guest_u013_patch_bytes_complex_test_script,
 )
 
 
@@ -199,10 +202,7 @@ def test_build_guest_u004_real_mcp_client_script_contains_checked_sources() -> N
     assert "get_xrefs" in script
     assert "execute_idapython" in script
     assert "apply_worker_changes" in script
-    assert (
-        '["py", "-3.11", "-m", "pip", "install", "-r", "requirements.txt", "--proxy", PIP_PROXY]'
-        in script
-    )
+    assert '["py", "-3.11", "-m", "pip", "install", "-r", "requirements.txt", "--proxy", PIP_PROXY]' in script
     assert "http://192.168.1.249:10810" in script
     assert "__WORKER_SCRIPT_B64_JSON__" not in script
     assert "__RUNTIME_FILES_B64_JSON__" not in script
@@ -247,6 +247,26 @@ def test_build_guest_u007_decompile_corner_case_script_contains_checked_sources(
     assert "Hex-Rays unavailable/failure path" in script
     assert "__IDA_API_TEST_MODE_JSON__" not in script
     compile(script, "<generated_u007_decompile_corner_case_payload>", "exec")
+
+
+def test_build_guest_u013_patch_bytes_complex_script_contains_checked_sources() -> None:
+    script = build_guest_u013_patch_bytes_complex_test_script()
+
+    assert "U013_PATCH_BYTES_COMPLEX_TEST_RESULT=" in script
+    assert "U013_STAGE=" in script
+    assert "U013_patch_bytes_complex_cases.py" in str(Path("U013_patch_bytes_complex_cases.py"))
+    assert "old_bytes mismatch" in script
+    assert "op-multi-byte-code" in script
+    assert "op-middle-byte-code" in script
+    assert "op-same-byte-code" in script
+    assert "op-repeat-byte-1" in script
+    assert "op-repeat-byte-2" in script
+    assert "op-data-byte" in script
+    assert "op-unmapped-partial-stop" in script
+    assert "destructive patch has partial status" in script
+    assert "metadata dirty after destructive partial patch" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    compile(script, "<generated_u013_patch_bytes_complex_payload>", "exec")
 
 
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
@@ -319,6 +339,18 @@ def test_disposable_vm_workflow_exposes_u007_decompile_corner_case_action() -> N
     assert "ida_plugin_u007_decompile_corner_case_test" in workflow
     assert U007_PAYLOAD_SCRIPT_NAME in workflow
     assert "ida_script_mcp.payload.ida_u007_decompile_corner_case_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u013_patch_bytes_complex_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u013_patch_bytes_complex_test" in workflow
+    assert "U013_patch_bytes_complex_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u013_patch_bytes_complex_test" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
@@ -512,5 +544,31 @@ def test_generated_u005_multi_ida_instance_payload_reports_missing_ida_dir(tmp_p
     assert result.returncode == 1
     assert "U005_MULTI_IDA_INSTANCE_TEST_RESULT=" in result.stdout
     assert '"mode": "u005_multi_ida_instance_selection"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_u013_patch_bytes_complex_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "U013_patch_bytes_complex_cases.py"
+    script_path.write_text(
+        build_guest_u013_patch_bytes_complex_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "U013_PATCH_BYTES_COMPLEX_TEST_RESULT=" in result.stdout
+    assert '"mode": "u013_patch_bytes_complex_cases"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "validate_inputs_start" in result.stdout
