@@ -635,6 +635,46 @@ Rule:
 - Artifact `result.json` usually only exposes the guest process stdout/stderr tail. Do not rely on huge final JSON blobs for diagnostics.
 - Every destructive payload should print a bounded, machine-readable final marker that still includes the failed assertion.
 
+## U010 rename-complex status: IDA Unicode symbol-name issue is parked
+
+U010 now has a dedicated workflow action and payload:
+
+```text
+task_action=ida_plugin_u010_rename_complex_test
+payload builder: src/ida_script_mcp/payload/ida_u010_rename_complex_test.py
+payload template: src/ida_script_mcp/payload/U010_rename_complex_cases.py
+```
+
+What is verified:
+
+```text
+local ruff and payload-generation tests pass
+workflow action is exposed
+HostMachine -> VMware restore -> guest hello -> payload download -> guest result upload works
+ASCII/default rename in success_matrix applies and is visible
+I64 retention copies the failing session database to the guest Desktop for manual repro
+```
+
+Current blocker:
+
+```text
+U010 success_matrix expects: mcp_u010_测试_<run_id>
+observed in disposable guest: mcp_u010____<run_id>
+affected path: ida_name.set_name(..., SN_NOCHECK|SN_NOWARN)
+```
+
+Decision:
+
+- Keep U010 in `UNTESTED.md`; do not move it to `TESTED.md` yet.
+- Park the issue until the IDA-side Chinese symbol-name fix is active in the disposable guest workflow path.
+- Re-run `ida_plugin_u010_rename_complex_test` after the guest snapshot/IDA install is updated.
+
+Manual repro database from the latest run:
+
+```text
+C:\Users\alion\Desktop\ida-script-mcp-u010-kept-i64\20260604-125255\success_matrix_test1.i64
+```
+
 ## Run index
 
 | Run | Commit | Result | Note |
@@ -667,6 +707,9 @@ Rule:
 | `26926227804` | `1638fab...` | Failure | U009 high unmapped address still returned `ff` fill; assertion contract needed to allow all-ff bytes with no metadata. |
 | `26926388631` | `d1a0cde...` | Success | U009 /inspect_address system test passed; artifact `7401596027`. |
 | `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
+| `26926011256` attempt 1 | `8b5f5b4...` | Failure | U010 rename-complex reached success_matrix; Unicode rename sanitized to underscores; artifact `7401490427`. |
+| `26926011256` attempt 2 | `8b5f5b4...` | Failure | U010 rerun after reported IDA-side fix still observed Unicode rename sanitized to underscores; artifact `7403233856`. |
+| `26931550914` | `98f6643...` | Failure | U010 rerun with I64 retention; failing `success_matrix_test1.i64` copied to guest Desktop; artifact `7403322921`. |
 | `26926069955` | `5a7272f...` | Failure | U011 core apply path reached expected partial apply, but Unicode final JSON crashed on the guest GBK stdout. |
 | `26926193824` | `8c1f617...` | Failure | U011 avoided the encoding crash, but full stdout JSON hid the failed assertion behind large response bodies. |
 | `26926598576` | `0ad9f93...` | Success | U011 comment/function_comment complex passed; artifact `7401657997`. |

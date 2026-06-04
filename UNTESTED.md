@@ -87,6 +87,60 @@ U007 已在当前 disposable VM + `test1.dll` 基线上通过并移入 `TESTED.m
   flags 不同组合
   ```
 
+  当前状态（2026-06-04）：**已执行但未通过，暂时搁置，后续先解决 IDA 中文符号名问题后再重测。**
+
+  已完成的验证：
+
+  ```text
+  PR: #7 / #15
+  branch: gpt/test-u010-20260604-fa6886
+  commits:
+    8b5f5b48e6d299b882116ac114f48bdb6bcbd070  add U010 rename-complex workflow/payload
+    98f66434e04008679e9359cac4604ff8e15397f0  preserve U010 I64 files for manual repro
+
+  local validation passed:
+    py -3 -m ruff check src/ida_script_mcp/payload/ida_u010_rename_complex_test.py src/ida_script_mcp/payload/U010_rename_complex_cases.py tests/test_ida_api_test_payload.py
+    py -3 -m pytest tests/test_ida_api_test_payload.py
+
+  workflow action exposed:
+    task_action=ida_plugin_u010_rename_complex_test
+
+  workflow/VM plumbing verified in failed runs:
+    HostMachine runner started
+    VMware restore succeeded
+    guest DESKTOP-QBSO5C3 connected
+    payload downloaded
+    result uploaded
+  ```
+
+  已跑 workflow 证据：
+
+  ```text
+  run 26926011256 attempt 1, artifact 7401490427, commit 8b5f5b48, result=failure
+  run 26926011256 attempt 2, artifact 7403233856, commit 8b5f5b48, result=failure
+  run 26931550914 attempt 1, artifact 7403322921, commit 98f66434, result=failure
+  ```
+
+  当前阻塞点：
+
+  ```text
+  failing session: success_matrix
+  default ASCII rename: passed and visible
+  expected Unicode rename: mcp_u010_测试_1780548787
+  observed Unicode rename: mcp_u010____1780548787
+  interpretation: disposable guest path still sanitizes Chinese symbol-name characters through ida_name.set_name(..., SN_NOCHECK|SN_NOWARN)
+  ```
+
+  手动复现保留文件：
+
+  ```text
+  C:\Users\alion\Desktop\ida-script-mcp-u010-kept-i64\20260604-125255\success_matrix_test1.i64
+  size: 442918 bytes
+  original session path: C:\Users\alion\AppData\Local\Temp\ida-script-mcp-u010-rename-o66m3ze1\success_matrix\test1.i64
+  ```
+
+  迁移规则：U010 暂时不要移入 `TESTED.md`。等 IDA 中文符号名问题在 disposable guest workflow 中生效后，重新跑 `ida_plugin_u010_rename_complex_test`；只有整个 rename 矩阵通过后，才从这里移到 `TESTED.md`。
+
 - [ ] **U014 partial apply / rollback 语义**
 
   示例：

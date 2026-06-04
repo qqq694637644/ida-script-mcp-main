@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import py_compile
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,12 @@ PLUGIN_EXPECTED_SHA256 = "__PLUGIN_EXPECTED_SHA256_JSON__"
 WORK_DIR = Path(tempfile.mkdtemp(prefix="ida-script-mcp-u010-rename-"))
 RESULT_PATH = WORK_DIR / "U010_rename_complex_cases_result.json"
 HEARTBEAT_PATH = WORK_DIR / "U010_rename_complex_cases_heartbeat.ndjson"
+KEEP_DIR = (
+    Path(os.environ.get("USERPROFILE", str(Path.home())))
+    / "Desktop"
+    / "ida-script-mcp-u010-kept-i64"
+    / time.strftime("%Y%m%d-%H%M%S")
+)
 
 BOOTSTRAP_TEMPLATE = r'''
 from __future__ import annotations
@@ -252,6 +259,39 @@ def _tail(path: Path, max_chars: int = 12000) -> str:
     except Exception:
         return ""
     return text[-max_chars:]
+
+
+def _keep_database_copy(session_name: str, database_path: Path) -> dict:
+    """Copy the session I64 to a stable guest Desktop path for manual repro."""
+
+    record = {
+        "session": session_name,
+        "source_path": str(database_path),
+        "keep_dir": str(KEEP_DIR),
+    }
+    try:
+        if not database_path.is_file():
+            record.update({"status": "missing", "message": "source I64 was not found"})
+            return record
+        KEEP_DIR.mkdir(parents=True, exist_ok=True)
+        kept_path = KEEP_DIR / f"{session_name}_{database_path.name}"
+        shutil.copy2(database_path, kept_path)
+        record.update(
+            {
+                "status": "copied",
+                "path": str(kept_path),
+                "size": kept_path.stat().st_size,
+            }
+        )
+    except Exception as exc:
+        record.update(
+            {
+                "status": "error",
+                "message": f"{type(exc).__name__}: {exc}",
+                "traceback": traceback.format_exc(),
+            }
+        )
+    return record
 
 
 def _ida_user_dir() -> Path:
@@ -963,6 +1003,7 @@ def _run_session(
         if process is not None:
             stdout, stderr = _read_process_pipes(process)
             session_result["ida_returncode"] = process.returncode
+        session_result["kept_database"] = _keep_database_copy(session_name, database_path)
         session_result.update(
             {
                 "ida_log_tail": _tail(ida_log_path),
@@ -984,6 +1025,7 @@ def main() -> int:
         "test_name": "rename complex cases",
         "dll_path": DLL_PATH,
         "work_dir": str(WORK_DIR),
+        "kept_i64_dir": str(KEEP_DIR),
         "sessions": {},
         "warnings": [],
         "checks": [],

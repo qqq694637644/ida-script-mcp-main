@@ -60,6 +60,7 @@ dirty=true / apply_changes_mutation_flag
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
 | U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U010 payload builder / workflow wiring only | commit `98f66434e04008679e9359cac4604ff8e15397f0`; local `ruff` and `pytest tests/test_ida_api_test_payload.py` | 只验证 U010 payload 生成、workflow action 暴露和 I64 retention 代码；真实 U010 rename 功能矩阵未通过，仍保留在 `UNTESTED.md` |
 | U006 `/functions` corner cases | workflow run `26925694907`, artifact `7401369820` | `functions_corner` mode covered segment/name/include/numeric/invalid parameter semantics; fixture-dependent residuals remain |
 | U007 `/decompile` corner case | workflow run `26926171098`, artifact `7401525174` | start/middle/name decompile, no-function/invalid/missing-name structured errors, thunk/import, largest function, Hex-Rays pseudocode path |
 | U008 `/xrefs` corner case | workflow run `26926339324`, artifact `7401576197` | code/data/flow filters, limit boundaries, name/missing-name, import thunk, string/data, cycle/backedge, dirty=false |
