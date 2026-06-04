@@ -6,7 +6,7 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、以及多 IDA 实例选择 U005 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、多 IDA 实例选择 U005、以及 `/decompile` corner case U007 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
@@ -14,9 +14,43 @@ U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
 U004 real MCP client end-to-end
 U005 multi-IDA instance selection
+U007 /decompile corner case
 ```
 
-下一轮建议从 apply_changes/read-only endpoint corner cases 或 installer/client config coverage 开始。
+下一轮建议从 U006 `/functions`、U008 `/xrefs`、U009 `/inspect_address`，或 apply_changes / installer / client config coverage 开始。
+
+
+## 已测项目的专门环境补测
+
+U007 已在当前 disposable VM + `test1.dll` 基线上通过并移入 `TESTED.md`。以下 U007 分支本次未实际触发，需要专门 license 状态或构造数据库再测：
+
+- [ ] **U007-F01 `/decompile` Hex-Rays unavailable / no-license path**
+
+  ```text
+  没有 Hex-Rays license
+  ida_hexrays.init_hexrays_plugin() 返回 false
+  /decompile found=true 但 hexrays_available=false
+  warning 解释 pseudocode 不可用
+  include_disassembly=true 时仍返回 disassembly
+  ```
+
+- [ ] **U007-F02 `/decompile` per-function Hex-Rays failure fallback**
+
+  ```text
+  Hex-Rays 对某个真实函数失败
+  /decompile found=true
+  pseudocode=null 或 unavailable
+  warning 有结构化说明
+  disassembly 仍可用
+  ```
+
+- [ ] **U007-F03 `/decompile` duplicate-name ambiguity**
+
+  ```text
+  构造或找到重复/歧义函数名
+  name 查询返回明确结果或结构化歧义错误
+  不误选错误函数
+  ```
 
 ## MCP 层未测
 
@@ -32,20 +66,6 @@ U005 multi-IDA instance selection
   limit 边界：0、负数、超大值
   offset 负数
   函数名重复或 demangled 名称
-  ```
-
-- [ ] **U007 `/decompile` corner case**
-
-  ```text
-  没有 Hex-Rays license
-  Hex-Rays 对某函数失败
-  地址在函数中间
-  地址在 thunk/import/library function
-  name 查询函数
-  name 重名
-  地址不在任何 function
-  巨大函数反编译耗时
-  反编译异常但 disassembly 可用
   ```
 
 - [ ] **U008 `/xrefs` corner case**
