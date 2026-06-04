@@ -58,6 +58,7 @@ restore_extra_args_json=[]
 | `patch_bytes` destructive smoke | Passed | `26919752930` |
 | U001 full V2.3 worker replay chain | Passed | `26922985347`, artifact `7400373325` |
 | U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
+| U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
 
 ### Final full-smoke coverage
 
@@ -149,6 +150,28 @@ artifact=disposable-vm-guest-agent-smoke / 7400538789
 ```
 
 This verifies the hard process timeout path and confirms the GUI database remains clean when a worker is killed.
+
+Run `26923830535` closed U003, the worker failure-state matrix:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=worker_failure_matrix
+payload status=passed
+worker_start_error actual_status=worker_start_error error_type=IdaExecutableNotConfigured worker_pid=null
+source_error actual_status=source_error error_type=FileNotFoundError worker_exit_code=0
+worker_crashed actual_status=worker_crashed error_type=WorkerResultMissing worker_exit_code=13
+worker_result_missing actual_status=worker_result_missing error_type=WorkerResultMissing worker_exit_code=0
+recorder_error actual_status=recorder_error error_type=RecorderError worker_exit_code=1
+rejected actual_status=rejected error_type=GuiDatabaseDirty worker_pid=null
+failure_matrix_dirty_apply.status=ok
+failure_matrix_metadata_dirty.dirty=true
+artifact=disposable-vm-guest-agent-smoke / 7400695878
+```
+
+This verifies the main structured failure classifications for isolated worker execution.
 
 ## Failure lessons and fixes
 
@@ -428,6 +451,8 @@ dedicated action/mode, not default full smoke
 | `26922985347` | `2df76f5...` | Success | U001 full worker-chain passed; artifact `7400373325`. |
 | `26923320696` | `192dd45...` | Failure | U002 timeout assertions passed, but payload cleanup failed because `_read_process_pipes` helper was missing. |
 | `26923418555` | `0f689dc...` | Success | U002 worker hard-timeout/kill-tree passed; artifact `7400538789`. |
+| `26923741508` | `409ced2...` | Failure | U003 payload failed before first matrix case due nested class `script_path` name resolution. |
+| `26923830535` | `fa086d2...` | Success | U003 worker failure-state matrix passed; artifact `7400695878`. |
 
 ## Current conclusion
 
@@ -439,10 +464,12 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, and worker hard-timeout/kill-tree behavior are now verified separately. The remaining highest-priority unverified area is:
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, and the U003 worker failure-state matrix are now verified separately.
+
+The remaining backlog starts after the core V2.3 worker lifecycle work. Next likely areas are:
 
 ```text
-U003 worker crash / result missing / recorder error matrix
+U004 real MCP client end-to-end
+U005 multi-IDA instance selection
+apply_changes/read-only endpoint corner cases
 ```
-
-Keep U003 separate from the existing full smoke, U001 worker-chain test, and U002 timeout test so failure domains remain clear.

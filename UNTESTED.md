@@ -6,26 +6,15 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-下一轮优先从 U003 开始。U001、U002 已通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003 已全部通过并移入 `TESTED.md`：
 
-- [ ] **U003 worker 异常状态矩阵**：真实 IDA worker 下构造 `worker_start_error`、`worker_crashed`、`worker_result_missing`、`recorder_error`、`source_error`、`rejected`。
+```text
+U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
+U002 worker hard timeout / kill process tree
+U003 worker failure-state matrix
+```
 
-现有 `disposable-vm-guest-agent-smoke.yml` 现已能通过 `ida_plugin_worker_chain_test` 覆盖 U001，并通过 `ida_plugin_worker_timeout_test` 覆盖 U002。后续 U003 仍应使用同一 workflow 架构新增独立 payload/mode，避免互相干扰。
-
-## 最高优先级：worker 异常矩阵
-
-- [ ] **U003 worker crash / result missing / recorder error**
-
-  构造并验证：
-
-  ```text
-  worker 脚本主动 os._exit(1)
-  worker 写坏 result.json
-  worker 不写 result.json
-  recorder 记录非法操作
-  IDA executable path 错误
-  数据库 copy 失败
-  ```
+下一轮建议从 MCP 层 U004 开始；也可以按风险优先选择 U005 多实例或 apply_changes corner cases。
 
 ## MCP 层未测
 

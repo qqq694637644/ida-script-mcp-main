@@ -57,6 +57,7 @@ dirty=true / apply_changes_mutation_flag
 | patch_bytes destructive smoke | workflow run `26919752930` | 临时 `test1.i64` 中 patch 首字节，不改原始 DLL |
 | U001 full V2.3 worker replay chain | workflow run `26922985347`, artifact `7400373325` | `execute_idapython -> worker ChangeSet -> apply_worker_changes dry-run/destructive -> inspect` |
 | U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
+| U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -125,10 +126,10 @@ unknown route -> HTTP 404
 Not covered by this run:
 
 ```text
-U003 worker crash/result-missing/recorder-error matrix
+U001/U002/U003 已由 dedicated workflow runs 覆盖。
 ```
 
-因此 U003 仍保留在 `UNTESTED.md`；U001 已由 run `26922985347` 关闭，U002 已由 run `26923418555` 关闭。
+因此核心 V2.3 worker 生命周期测试 U001-U003 均已关闭。
 
 
 ## 2026-06-04 U001：完整 V2.3 worker replay 主链路
@@ -211,7 +212,7 @@ Notes:
 
 - The guest payload code is checked in as `src/ida_script_mcp/payload/guest_worker_chain_payload.py`, and the worker script is checked in as `src/ida_script_mcp/payload/worker_chain_user_script.py`; the workflow transports generated script text, but the core test logic is reviewable and locally checked.
 - Two implementation issues were found and fixed before U001 passed: guest Python lacked `pydantic`, and IDA 8.3 exposed `idc.SetType` but not `idc.set_type` in the worker.
-- U003 remains in `UNTESTED.md`.
+- U002/U003 are now covered by dedicated workflow runs.
 
 
 ## 2026-06-04 U002：worker hard timeout / kill process tree
@@ -286,7 +287,97 @@ Notes:
 
 - The worker timeout script is checked in as `src/ida_script_mcp/payload/worker_timeout_user_script.py` and writes a sentinel file before blocking in `time.sleep(999)`.
 - Run `26923320696` first proved the timeout assertions but failed in final payload cleanup because `_read_process_pipes` had been accidentally dropped during refactor. Commit `0f689dc805cca38c64296645984877e92228c8ca` fixed that cleanup issue.
-- U003 remains in `UNTESTED.md`.
+- U002/U003 are now covered by dedicated workflow runs.
+
+
+## 2026-06-04 U003：worker failure-state matrix
+
+Evidence:
+
+- Workflow run: `26923830535`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `fa086d2a61f318efb7c4e2dc1dd8d8b7784e55e0`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7400695878`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_worker_failure_matrix_test
+ida_timeout_seconds=240
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=worker_failure_matrix
+payload status=passed
+worker_failure_matrix.worker_start_error.passed=true
+worker_failure_matrix.worker_start_error.actual_status=worker_start_error
+worker_failure_matrix.worker_start_error.error_type=IdaExecutableNotConfigured
+worker_failure_matrix.worker_start_error.worker_pid=null
+worker_failure_matrix.source_error.passed=true
+worker_failure_matrix.source_error.actual_status=source_error
+worker_failure_matrix.source_error.error_type=FileNotFoundError
+worker_failure_matrix.source_error.worker_exit_code=0
+worker_failure_matrix.worker_crashed.passed=true
+worker_failure_matrix.worker_crashed.actual_status=worker_crashed
+worker_failure_matrix.worker_crashed.error_type=WorkerResultMissing
+worker_failure_matrix.worker_crashed.worker_exit_code=13
+worker_failure_matrix.worker_result_missing.passed=true
+worker_failure_matrix.worker_result_missing.actual_status=worker_result_missing
+worker_failure_matrix.worker_result_missing.error_type=WorkerResultMissing
+worker_failure_matrix.worker_result_missing.worker_exit_code=0
+worker_failure_matrix.recorder_error.passed=true
+worker_failure_matrix.recorder_error.actual_status=recorder_error
+worker_failure_matrix.recorder_error.error_type=RecorderError
+worker_failure_matrix.recorder_error.worker_exit_code=1
+failure_matrix_dirty_apply.status=ok
+failure_matrix_metadata_dirty.dirty=true
+worker_failure_matrix.rejected.passed=true
+worker_failure_matrix.rejected.actual_status=rejected
+worker_failure_matrix.rejected.error_type=GuiDatabaseDirty
+worker_failure_matrix.rejected.worker_pid=null
+failure matrix all passed=true
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+worker_start_error via invalid IDA_SCRIPT_MCP_IDA_PATH
+source_error via missing script_path inside real headless worker
+worker_crashed via checked-in os._exit(13) worker script
+worker_result_missing via checked-in os._exit(0) worker script
+recorder_error via checked-in invalid mcp_changes.patch_bytes call
+rejected via dirty GUI database after explicit /apply_changes mutation
+all cases returned structured ExecuteResult statuses
+```
+
+Notes:
+
+- The failure scripts are checked in as:
+  - `src/ida_script_mcp/payload/worker_crash_user_script.py`
+  - `src/ida_script_mcp/payload/worker_result_missing_user_script.py`
+  - `src/ida_script_mcp/payload/worker_recorder_error_user_script.py`
+- Run `26923741508` first failed before any case executed because the nested `ExecuteParams` class referenced `script_path` with a same-name class attribute. Commit `fa086d2a61f318efb7c4e2dc1dd8d8b7784e55e0` fixed that issue.
+- Core V2.3 worker lifecycle tests U001-U003 are now complete.
 
 ## 移入规则
 
