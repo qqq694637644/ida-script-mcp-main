@@ -1,202 +1,104 @@
 # IDA Script MCP
 
-IDA Script MCP connects AI assistants to IDA Pro databases through the Model Context Protocol (MCP). The current branch is a breaking, security-focused rewrite that keeps common reverse-engineering reads simple while moving custom IDAPython queries and database mutations behind headless isolated execution, process-level hard timeouts, explicit replay, fingerprint checks, and real IDA workflow tests.
+**English** | [中文](#中文)
 
-This README describes the current PR branch, not the older 1.1-era README.
+IDA Script MCP connects MCP-compatible AI assistants to live IDA Pro databases. It
+keeps common reverse-engineering reads as small structured tools, while custom
+IDAPython runs in a separate headless IDA worker process instead of directly in
+the GUI instance.
 
-## What this version solves
+The project is intentionally local-first: the IDA plugin listens on localhost,
+tracks running IDA instances, exposes read-only HTTP endpoints for common
+analysis, and uses explicit replayable change sets for worker-side write
+operations.
 
-Earlier versions allowed a convenient but risky pattern: run arbitrary IDAPython directly in the GUI IDA process and optionally apply changes from that execution path. That made it hard to reason about database state, dirty/unsaved databases, worker failures, and repeatability.
+## Highlights
 
-The current version solves that by adding a V2.3 isolated execution design and a disposable-VM integration test pipeline:
+- Multi-instance discovery for several open IDA databases.
+- Structured read tools for metadata, function lists, decompilation, xrefs, and
+  address inspection through the IDA plugin.
+- Isolated `execute_idapython` worker execution with hard timeouts, stdout/stderr
+  capture, worker process metadata, retained artifacts, and structured statuses.
+- Worker change recording for rename, comments, function comments, type changes,
+  and byte patches.
+- `apply_worker_changes` for dry-run preview and explicit replay into the GUI
+  database.
+- Installer support for Claude Desktop, Claude Code, Cursor, VS Code, Windsurf,
+  and Codex global/project configs.
+- Packaged IDAPython guidance under `ida_script_mcp/resources/idapython/`.
 
-- **Public `execute_idapython` is isolated-only.** It copies a saved clean IDB/I64 database and runs query/execution code in a separate headless IDA worker process with a hard process timeout. It does not fall back to GUI `/execute`.
-- **GUI `/execute` is disabled by default.** The plugin returns HTTP 410 for GUI execute requests unless an explicit development escape hatch is enabled.
-- **Only reviewed writes reach the GUI database.** Worker-side changes are represented as a structured `ChangeSet` and replayed through GUI `/apply_changes` or the MCP `apply_worker_changes` tool. Arbitrary user IDAPython query code itself does not execute in the GUI database.
-- **Database identity is checked.** Replay uses a saved database SHA-256 fingerprint. Bad fingerprints are rejected.
-- **Dirty/unsaved state is fail-closed.** If the GUI database is dirty or identity is unknown, destructive apply is rejected. On IDA 8.3 where some dirty APIs are unavailable, the plugin tracks an internal mutation flag after successful apply.
-- **Dry-run is the default.** `/apply_changes` defaults to dry-run and must be explicitly called with `dry_run=false` to mutate the database.
-- **IDA 8.3 behavior is handled.** The implementation accounts for real IDA 8.3/IDAPython differences around `patch_bytes`, `patch_byte`, function comments, and type application.
-- **Plugin installation is clean.** Only the real plugin entry lives in the IDA `plugins` root. Support modules live in `ida_script_mcp_support/` so IDA does not treat helper files as plugins.
-- **The workflow is tested against a real guest IDA.** A HostMachine workflow restores a disposable guest VM, dynamically sends payloads to a guest agent, opens IDA 8.3, loads `test1.dll`, starts the plugin, and verifies real endpoints and destructive apply behavior.
+## Requirements
 
-## Architecture
+- IDA Pro 8.3 or newer. IDA Free is not supported because it does not support the
+  plugin workflow used here.
+- Python 3.11 or newer for the MCP server package.
+- Windows is currently the supported platform for isolated worker execution. The
+  worker discovery path deliberately requires a live GUI `ida64.exe` process and
+  a same-directory `idat64.exe`.
 
-```text
-AI client / MCP client
-        |
-        v
-ida-script-mcp server
-        |
-        |  structured live reads:
-        |    GUI plugin read-only endpoints (/metadata, /functions, /decompile, /xrefs)
-        |
-        |  custom IDAPython queries/execution:
-        |    copy saved clean IDB/I64
-        |    launch headless IDA worker process
-        |    enforce hard process timeout / kill process tree
-        |    collect result.json and optional ChangeSet
-        |
-        |  writes:
-        |    apply_worker_changes -> GUI plugin /apply_changes
-        |    verify fingerprint and dirty/unsaved state
-        v
-GUI IDA database is mutated only by explicit apply_changes replay
+Read-only MCP tools and plugin installation are written to be portable where IDA
+and Python support them, but the current public `execute_idapython` path is
+Windows/fail-fast by design.
+
+## Install
+
+Install the package into the Python environment that will run the MCP server:
+
+```bash
+pip install ida-script-mcp
 ```
 
-The important boundary is: **structured built-in reads are live read-only GUI endpoint calls; arbitrary/custom IDAPython query code runs in the headless worker copy; writes are explicit GUI replays.** The live GUI IDA process provides metadata and read-only structured analysis endpoints, and it applies reviewed changes, but it is not the execution sandbox for arbitrary query code.
+Install the IDA plugin and optionally configure one or more MCP clients:
 
-The disposable VM test path adds:
-
-```text
-GitHub workflow_dispatch
--> HostMachine self-hosted runner
--> host controller
--> VMware snapshot restore
--> guest VM agent
--> dynamically generated Python payload
--> IDA 8.3 in guest
--> artifact/result upload
-```
-
-## MCP tools
-
-| Tool | Purpose | Mutates IDA? |
-| --- | --- | --- |
-| `list_ida_instances` | Discover running IDA plugin instances. | No |
-| `get_ida_database_info` | Read live GUI metadata, hashes, paths, dirty state, and instance info. | No |
-| `list_functions` | Read live GUI function lists through the plugin's structured read endpoint. | No |
-| `decompile_function` | Read live GUI Hex-Rays pseudocode and optional disassembly. | No |
-| `get_xrefs` | Read live GUI xrefs to/from an address or symbol. | No |
-| `execute_idapython` | Run IDAPython queries in a headless isolated worker database copy with a hard process timeout. | Worker copy only |
-| `apply_worker_changes` | Preview or apply a worker `ChangeSet` to the GUI database. | Yes, only when `dry_run=false` |
-
-The plugin also exposes localhost HTTP endpoints used by the MCP server and workflow tests. `/metadata`, `/functions`, `/decompile`, `/xrefs`, and `/inspect_address` are live read-only GUI endpoints. `/apply_changes` is the explicit GUI write replay endpoint. `/execute` is rejected by default.
-
-```text
-GET  /health
-GET  /metadata
-POST /functions
-POST /decompile
-POST /xrefs
-POST /inspect_address
-POST /apply_changes
-POST /execute   # rejected by default in GUI mode
-```
-
-## Installation
-
-### Runtime requirements
-
-- IDA Pro 8.3+ with IDAPython 3.11 on the IDA side.
-- Python 3.11+ for the MCP server package.
-- The IDA plugin path itself does **not** require `pydantic` inside IDA's embedded Python; support modules use fallbacks where needed.
-
-### Install from source
-
-```powershell
-git clone https://github.com/qqq694637644/ida-script-mcp-main.git
-cd ida-script-mcp-main
-py -3 -m pip install -e .
-```
-
-### Install the IDA plugin
-
-After installing the Python package, install the plugin into IDA's **per-user**
-plugin directory:
-
-```powershell
-py -3 -m ida_script_mcp.installer install
-```
-
-Equivalent console-script form:
-
-```powershell
+```bash
+# Plugin only
 ida-script-mcp-install install
-```
 
-or with a supported MCP client configuration:
-
-```powershell
+# Plugin plus one client config
 ida-script-mcp-install install codex
+
+# Multiple clients
 ida-script-mcp-install install claude,codex,cursor
+
+# Project-level config for clients that support it
 ida-script-mcp-install install --project codex
+
+# Show supported clients
 ida-script-mcp-install --list-clients
 ```
 
-The installer chooses the IDA user directory automatically:
+The installer writes the plugin to the per-user IDA plugin directory and installs
+support modules under `ida_script_mcp_support/`. Restart IDA after plugin
+installation or update.
 
-```text
-Windows: %APPDATA%\Hex-Rays\IDA Pro
-macOS/Linux: ~/.idapro
+## Install from source
+
+```bash
+git clone https://github.com/qqq694637644/ida-script-mcp-main.git
+cd ida-script-mcp-main
+pip install -e .
+ida-script-mcp-install install codex
 ```
 
-The current installer layout is:
+For development:
 
-```text
-<IDA user dir>/plugins/ida_script_mcp.py
-<IDA user dir>/plugins/ida_script_mcp_support/__init__.py
-<IDA user dir>/plugins/ida_script_mcp_support/protocol.py
-<IDA user dir>/plugins/ida_script_mcp_support/execution.py
-<IDA user dir>/plugins/ida_script_mcp_support/change_protocol.py
-<IDA user dir>/plugins/ida_script_mcp_support/change_recorder.py
+```bash
+pip install -e ".[dev]"
+py -3 -m ruff check src tests
+py -3 -m pytest -q
 ```
 
-On a normal Windows IDA install this means files like:
-
-```text
-%APPDATA%\Hex-Rays\IDA Pro\plugins\ida_script_mcp.py
-%APPDATA%\Hex-Rays\IDA Pro\plugins\ida_script_mcp_support\protocol.py
-```
-
-The installer tries to use symlinks when possible and falls back to copying when
-symlinks are unavailable. It also removes old root-level support files such as
-`ida_script_mcp_protocol.py`, because IDA scans root-level `plugins/*.py` files
-as plugin entrypoints.
-
-Restart IDA after installation, then open a database and enable the plugin from
-**Edit -> Plugins -> IDA-Script-MCP**. The installer prints the same reminder:
-
-```text
-Installed IDA Pro plugin (IDA restart required)
-  To enable: Edit -> Plugins -> IDA-Script-MCP (Ctrl+Alt+S)
-```
-
-To uninstall the IDA plugin later:
-
-```powershell
-ida-script-mcp-install uninstall
-```
-
-If installation fails, check that you are using **IDA Pro** rather than IDA Free;
-IDA Free does not support plugins.
-
-Manual fallback: copy `src/ida_script_mcp/ida_plugin.py` to
-`<IDA user dir>/plugins/ida_script_mcp.py`, create
-`<IDA user dir>/plugins/ida_script_mcp_support/`, and copy these support files
-from `src/ida_script_mcp/` into that support package:
-
-```text
-protocol.py
-execution.py
-change_protocol.py
-change_recorder.py
-```
-
-Do **not** place those support files directly in the `plugins` root.
-
-## Starting the plugin
+## Start the IDA plugin
 
 1. Open IDA Pro and load a database.
-2. Start **Edit -> Plugins -> IDA-Script-MCP** or use the plugin hotkey if configured.
-3. IDA prints the instance id and endpoints.
+2. Use **Edit → Plugins → IDA-Script-MCP** or press `Ctrl+Alt+S`.
+3. Watch IDA's output window for the instance id and local endpoints.
 
-Example log:
+Example output:
 
 ```text
-[IDA-Script-MCP] Plugin loaded (supports multiple instances)
-[IDA-Script-MCP] Registered instance: 3396_test1.dll
 [IDA-Script-MCP] Server started at http://127.0.0.1:13338
+[IDA-Script-MCP] Instance ID: 2540_test1.dll
 [IDA-Script-MCP] Metadata endpoint: GET http://127.0.0.1:13338/metadata
 [IDA-Script-MCP] Functions endpoint: POST http://127.0.0.1:13338/functions
 [IDA-Script-MCP] Decompile endpoint: POST http://127.0.0.1:13338/decompile
@@ -206,282 +108,364 @@ Example log:
 [IDA-Script-MCP] Apply changes endpoint: POST http://127.0.0.1:13338/apply_changes
 ```
 
-## Starting the MCP server
+## Configure MCP clients
 
-```powershell
-ida-script-mcp
+The installer is the recommended path. A minimal manual JSON config looks like:
+
+```json
+{
+  "mcpServers": {
+    "ida-script-mcp": {
+      "command": "python",
+      "args": ["-m", "ida_script_mcp.server"]
+    }
+  }
+}
 ```
 
-Useful options:
+For Codex TOML configs:
 
-```powershell
-ida-script-mcp --ida-host 127.0.0.1 --ida-port 13338
-ida-script-mcp --ida-instance 3396_test1.dll
-ida-script-mcp --transport http --port 8765
+```toml
+[mcp_servers.ida-script-mcp]
+command = "python"
+args = ["-m", "ida_script_mcp.server"]
 ```
 
-The default MCP transport is stdio.
+Supported client targets include Claude Desktop, Claude Code, Cursor, VS Code,
+Windsurf, and Codex. Some clients also support project-level config files such as
+`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.windsurf/mcp_config.json`,
+and `.codex/config.toml`.
 
-## Recommended LLM workflow
+## MCP tools
 
-1. Run `list_ida_instances` when more than one IDA database may be open.
-2. Run `get_ida_database_info` before making assumptions about the active database.
-3. Use structured read-only tools first: `list_functions`, `decompile_function`, `get_xrefs`. These read the live GUI database through read-only plugin endpoints.
-4. Use `execute_idapython` for long-tail custom IDAPython queries. This path runs in a headless isolated copied database with a process-level timeout.
-5. If worker changes are collected, call `apply_worker_changes` first as dry-run.
-6. Only call `apply_worker_changes` with `dry_run=false` after checking the fingerprint and confirming the GUI database is clean.
-
-## `execute_idapython` behavior
-
-`execute_idapython` is intentionally isolated and headless:
-
-```text
-GUI IDA metadata -> saved clean database fingerprint -> copied IDB/I64
--> headless IDA worker process -> hard timeout / process-tree kill
--> result.json -> optional ChangeSet
-```
-
-It can return statuses such as:
-
-```text
-completed
-failed
-rejected
-worker_start_error
-worker_crashed
-worker_result_missing
-recorder_error
-timeout
-```
-
-Important rules:
-
-- The public schema does not expose `in_process`, `isolation`, or `auto_apply` toggles.
-- GUI `/execute` is rejected by default.
-- Query code runs in the worker database copy. The GUI database is not changed by `execute_idapython` itself.
-- Replay requires `apply_worker_changes` / `/apply_changes`.
-
-## `apply_changes` behavior
-
-`apply_changes` is the explicit replay path for database mutations. It supports structured operations such as:
-
-```text
-rename
-comment
-function_comment
-set_type
-patch_bytes
-```
-
-Core safety behavior:
-
-- `dry_run` defaults to true.
-- Bad database fingerprints are rejected.
-- Dirty/unsaved GUI databases are rejected for destructive apply.
-- After successful destructive apply, the plugin marks an internal mutation flag so later applies are rejected even when `idaapi.is_database_modified` is unavailable.
-- `patch_bytes` treats IDA 8.3 `ida_bytes.patch_bytes()` returning `None` as success.
-- `patch_byte` fallback does not treat return value `0` as a universal failure, because the target byte may already match.
-- `function_comment` resolves the function object with `ida_funcs.get_func(ea)` before calling `set_func_cmt`.
-- `set_type` falls back across `idc.set_type`, `idc.SetType`, and `ida_typeinf.apply_cdecl()` for IDA 8.3 compatibility.
-
-`/inspect_address` is a read-only validation endpoint used by tests to verify names, comments, types, bytes, and disassembly after apply.
-
-## Disposable VM workflow
-
-The workflow file is:
-
-```text
-.github/workflows/disposable-vm-guest-agent-smoke.yml
-```
-
-It is manually triggered by `workflow_dispatch` and runs on the HostMachine self-hosted Windows runner. The host side starts a controller, restores the guest VM snapshot, waits for the guest agent, sends a dynamic payload, and uploads artifacts.
-
-### Workflow actions
-
-| `task_action` | Purpose |
-| --- | --- |
-| `noop` | Connectivity smoke. |
-| `command` | Run a list-form command such as `["python", "--version"]`. |
-| `python_script` | Send and run a generated Python script. |
-| `ida_plugin_install` | Install/update the plugin in the guest IDA user plugin directory and verify layout. |
-| `ida_plugin_api_test` | Open a DLL in guest IDA and test read-only plugin endpoints. |
-| `ida_plugin_apply_changes_test` | Run destructive `apply_changes` smoke against a temporary IDA database. |
-
-### Stable inputs used for the verified guest
-
-```text
-controller_url=http://192.168.1.249:8766
-port=8766
-restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
-run_vmware_restore=true
-restore_extra_args_json=[]
-ida_dir=C:\Users\alion\Desktop\IDAPro8.3
-dll_path=C:\Users\alion\Desktop\test1.dll
-ida_timeout_seconds=180
-connect_timeout_seconds=600
-```
-
-For API smoke:
-
-```text
-task_action=ida_plugin_api_test
-ida_api_test_mode=basic  # or full
-run_timeout_seconds=300
-```
-
-For destructive apply smoke:
-
-```text
-task_action=ida_plugin_apply_changes_test
-ida_api_test_mode=apply_changes
-run_timeout_seconds=300
-```
-
-### Guest snapshot dependencies
-
-Base guest agent snapshot:
-
-```powershell
-py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\requirements.txt
-py -3.11 -m ida_script_mcp.guest_vm.required_imports
-```
-
-Automation snapshot for GUI/process automation and API checks:
-
-```powershell
-py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\automation_requirements.txt
-py -3.11 -m ida_script_mcp.guest_vm.required_automation_imports
-```
-
-Current automation requirements:
-
-```text
-requests>=2.32.0
-pywinauto>=0.6.8
-psutil>=5.9.0
-```
-
-## Verified workflow results on PR #1
-
-The current PR is open and mergeable as of the last verification notes. The following real workflow runs have passed on the disposable VM path.
-
-| Area | Run | Result |
+| Tool | Purpose | Writes? |
 | --- | --- | --- |
-| Connectivity / guest agent smoke | `26900876629` | success |
-| Command payload | `26902252502`, rerun `26902716245` | success |
-| Python script payload | `26903071347` | success |
-| IDA plugin install | `26903926544`, package-layout run `26907543538` | success |
-| IDA API basic smoke | `26908653405` | success |
-| IDA API full smoke + corner cases | `26909020426` | success |
-| `apply_changes` destructive smoke | `26918788898` | success |
-| `patch_bytes` destructive apply at `DllEntryPoint` | `26919752930` | success |
+| `list_ida_instances` | List live IDA plugin instances and their ids/ports. | No |
+| `get_ida_database_info` | Return metadata, dirty state, hashes, imagebase, processor, and database paths. | No |
+| `list_functions` | Page and filter functions by name, segment, thunk/library inclusion. | No |
+| `decompile_function` | Decompile by address or name, optionally with disassembly. | No |
+| `get_xrefs` | Return xrefs to/from an address or symbol, with kind filtering. | No |
+| `execute_idapython` | Run custom IDAPython in an isolated worker IDA process. | Worker only |
+| `apply_worker_changes` | Dry-run or replay a worker-produced ChangeSet into the GUI database. | Optional |
 
-### Read-only/full API coverage verified
+Targeting rules:
 
-Run `26909020426` verified:
+- With one live IDA instance, tools can usually omit `instance_id` and `port`.
+- With multiple instances, call `list_ida_instances` first and pass either
+  `instance_id` or `port` to later tools.
+- Environment variables `IDA_SCRIPT_MCP_INSTANCE_ID` and `IDA_SCRIPT_MCP_PORT`
+  can select a default target for the MCP server process.
 
-```text
-/health
-/metadata
-/functions
-/functions limit=1
-/functions name filter
-/functions offset beyond total -> returned=0, functions=[]
-/decompile
-/decompile invalid address -> found=false
-/xrefs direction=to
-/xrefs direction=from
-/xrefs invalid direction -> structured error
-/xrefs invalid xref_kind -> structured error
-/execute -> HTTP 410, status=rejected
-unknown route -> HTTP 404
+## Read-only analysis workflow
+
+Use structured read tools before asking an assistant to write IDAPython:
+
+1. `list_ida_instances`
+2. `get_ida_database_info`
+3. `list_functions`
+4. `decompile_function`
+5. `get_xrefs`
+
+This avoids unnecessary custom scripts for common operations and gives the model
+stable, typed responses.
+
+## Isolated IDAPython execution
+
+`execute_idapython` no longer runs public scripts through the GUI `/execute`
+endpoint. The server creates a worker job and launches headless IDA with a copied
+IDB/I64 database.
+
+Current worker discovery is intentionally strict:
+
+1. Resolve the selected live GUI IDA instance.
+2. Read its PID from the instance registry.
+3. Resolve that PID to the GUI executable path.
+4. Require the executable basename to be `ida64.exe`.
+5. Require `idat64.exe` in the same directory.
+6. Launch that `idat64.exe` as the isolated worker.
+
+There is no fallback to `IDA_SCRIPT_MCP_IDA_PATH`, `IDA_SCRIPT_MCP_WORKER_MODE`,
+or `PATH`. Missing PID, missing executable path, non-`ida64.exe` GUI process, or
+missing same-directory `idat64.exe` returns `worker_start_error` and exposes the
+problem early.
+
+The GUI database must also be in a known clean state. The worker path refuses to
+run if the GUI database dirty state is unknown or dirty. Save the database before
+running custom write-capable scripts.
+
+Common `execute_idapython` statuses:
+
+- `ok`
+- `timeout`
+- `script_error`
+- `source_error`
+- `worker_start_error`
+- `worker_crashed`
+- `worker_result_missing`
+- `recorder_error`
+- `rejected`
+
+## Worker changes and replay
+
+Worker scripts can call IDAPython APIs normally. The worker runtime also records
+selected database-changing operations into a structured ChangeSet:
+
+- `rename`
+- `comment`
+- `function_comment`
+- `set_type`
+- `patch_bytes`
+
+The worker returns these operations in `changes` and writes artifacts such as
+`request.json`, `metadata.json`, `changes.json`, `worker_runtime.json`, stdout,
+and stderr.
+
+Replay should be explicit:
+
+1. Run `execute_idapython` and inspect its `changes`.
+2. Call `apply_worker_changes` with `dry_run=true` to preview the GUI replay.
+3. Call `apply_worker_changes` with `dry_run=false` only after review.
+
+Replay checks the saved GUI database fingerprint before applying operations.
+
+## Security model
+
+- The IDA plugin binds to `127.0.0.1` by default.
+- Public MCP `execute_idapython` is isolated; GUI `/execute` is disabled by
+  default.
+- Custom IDAPython is still arbitrary code and should only be accepted from
+  trusted assistants/users.
+- `apply_worker_changes` can modify the open IDA database when `dry_run=false`.
+- Keep IDA databases saved and clean before worker execution.
+
+There is an unsafe GUI execution escape hatch for internal testing, controlled by
+`IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE`; it is not the normal public workflow.
+
+## Useful environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `IDA_SCRIPT_MCP_HOST` | IDA plugin host, default `127.0.0.1`. |
+| `IDA_SCRIPT_MCP_PORT` | Default target plugin port. |
+| `IDA_SCRIPT_MCP_INSTANCE_ID` | Default target instance id. |
+| `IDA_SCRIPT_MCP_WORK_DIR` | Directory for isolated worker jobs. |
+| `IDA_SCRIPT_MCP_KEEP_JOBS` | Set to `1` to retain worker job artifacts. |
+| `IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE` | Enables legacy GUI `/execute`; not recommended. |
+
+`IDA_SCRIPT_MCP_IDA_PATH` and `IDA_SCRIPT_MCP_WORKER_MODE` are intentionally not
+used for public worker discovery.
+
+## Disposable VM testing
+
+The repository includes a disposable VM test harness used by GitHub Actions on a
+self-hosted Windows runner. Useful entry points include:
+
+- `ida-script-mcp-vm-host-controller`
+- `ida-script-mcp-vm-guest-agent`
+- `.github/workflows/disposable-vm-guest-agent-smoke.yml`
+
+The workflow contains targeted actions for plugin install, API reads, worker
+lifecycle, worker failure matrix, complex apply/replay cases, and GUI-derived
+worker discovery.
+
+## License
+
+MIT License
+
+---
+
+<a id="中文"></a>
+# IDA Script MCP（中文）
+
+IDA Script MCP 用于把支持 MCP 的 AI 助手连接到正在运行的 IDA Pro 数据库。项目的核心思路是：
+高频逆向读取用稳定的结构化工具完成，自定义 IDAPython 则在独立的 headless IDA worker 里执行，
+不要直接阻塞或污染 GUI IDA 实例。
+
+插件默认只监听 localhost，会登记当前运行的 IDA 实例，提供常见分析端点，并把 worker 侧产生的写操作
+记录成可审查、可 dry-run、可显式回放的 ChangeSet。
+
+## 主要能力
+
+- 支持同时发现多个打开的 IDA 数据库。
+- 结构化只读工具：数据库信息、函数列表、反编译、交叉引用、地址检查。
+- `execute_idapython` 使用隔离 worker：硬超时、stdout/stderr 捕获、worker PID/退出码、artifact 保留、结构化状态。
+- worker 可记录 rename、注释、函数注释、类型修改、字节 patch 等变更。
+- `apply_worker_changes` 支持先 dry-run 预览，再显式回放到 GUI 数据库。
+- 安装器支持 Claude Desktop、Claude Code、Cursor、VS Code、Windsurf、Codex 的全局/项目配置。
+- 随包携带 IDAPython 使用指南：`ida_script_mcp/resources/idapython/`。
+
+## 要求
+
+- IDA Pro 8.3+；IDA Free 不支持本插件工作流。
+- MCP server 使用 Python 3.11+。
+- 当前公开的隔离 worker 执行路径以 Windows 为目标：必须有正在服务的 GUI `ida64.exe`，并且同目录存在 `idat64.exe`。
+
+只读工具和插件安装逻辑尽量保持可移植；但当前 `execute_idapython` 的 public worker 路径是 Windows/fail-fast 设计。
+
+## 安装
+
+```bash
+pip install ida-script-mcp
 ```
 
-### `apply_changes` coverage verified
+安装 IDA 插件，并按需配置 MCP 客户端：
 
-Run `26918788898` verified:
+```bash
+# 只安装插件
+ida-script-mcp-install install
 
-```text
-bad fingerprint is rejected
-default dry-run does not modify the database
-destructive apply applies rename/comment/function_comment/set_type
-metadata dirty=true after destructive apply
-dirty method=apply_changes_mutation_flag
-second destructive apply is rejected because the database is dirty/unsaved
+# 插件 + Codex 配置
+ida-script-mcp-install install codex
+
+# 多客户端
+ida-script-mcp-install install claude,codex,cursor
+
+# 项目级 Codex 配置
+ida-script-mcp-install install --project codex
+
+# 查看支持的客户端
+ida-script-mcp-install --list-clients
 ```
 
-Run `26919752930` verified real destructive `patch_bytes` against a temporary IDA database created by the workflow:
+安装器会把插件写入当前用户的 IDA 插件目录，并安装 `ida_script_mcp_support/` 支持包。安装或更新后需要重启 IDA。
 
-```text
-patch target: 0x180002308 / DllEntryPoint
+源码安装：
 
-before:
-bytes_hex   = 48895c2408488974
-disassembly = mov [rsp+arg_0], rbx
-
-after destructive apply:
-bytes_hex   = 90895c2408488974
-disassembly = nop
-
-operation:
-op_id  = op-patch-byte
-op     = patch_bytes
-status = applied
+```bash
+git clone https://github.com/qqq694637644/ida-script-mcp-main.git
+cd ida-script-mcp-main
+pip install -e .
+ida-script-mcp-install install codex
 ```
 
-This patch happens in the temporary workflow IDA database (`test1.i64`) and does not modify the original `test1.dll` file.
+开发验证：
 
-## Local validation reported for the latest apply_changes work
-
-The apply_changes verification sequence reported:
-
-```text
-python -m ruff check .            # passed
-python -m pytest -q               # 144 passed
-python -m compileall -q src tests  # passed
-git diff --check                  # passed
-```
-
-## Important safety notes
-
-- The default read/API workflow is non-destructive.
-- GUI `/execute` is rejected by default.
-- Destructive apply tests are separate and explicitly named.
-- Destructive workflow tests use a temporary IDA database generated by the workflow.
-- The current patch-bytes test depends on the sample DLL having `DllEntryPoint` at `0x180002308`. If the DLL changes, parameterize or rediscover the patch target.
-- Do not add new mutation behavior to the standard full smoke. Keep mutation tests in the `apply_changes` mode.
-
-## Operational documents
-
-The repository keeps two root workflow-memory documents:
-
-```text
-DISPOSABLE_VM_WORKFLOW_LESSONS.md
-PORTABLE_WORKFLOW_DEVELOPMENT_LESSONS.md
-```
-
-`DISPOSABLE_VM_WORKFLOW_LESSONS.md` is project-specific operational memory for this HostMachine/guest/IDA setup.
-
-`PORTABLE_WORKFLOW_DEVELOPMENT_LESSONS.md` is a project-agnostic playbook for building workflows that drive external machines, VMs, desktop applications, agents, and long-running integration targets.
-
-## Development
-
-Install dev dependencies:
-
-```powershell
-py -3 -m pip install -e .[dev]
-```
-
-Run local checks:
-
-```powershell
-py -3 -m pytest -q
+```bash
+pip install -e ".[dev]"
 py -3 -m ruff check src tests
-py -3 -m compileall -q src tests
+py -3 -m pytest -q
 ```
 
-## Status
+## 启动 IDA 插件
 
-This branch has moved beyond unit-only validation. The disposable VM workflow has verified real IDA 8.3 plugin installation, read-only API behavior, negative cases, isolated execution safety boundaries, and destructive `apply_changes` replay including a real `patch_bytes` operation against a temporary IDA database.
+1. 打开 IDA Pro 并加载数据库。
+2. 选择 **Edit → Plugins → IDA-Script-MCP**，或按 `Ctrl+Alt+S`。
+3. 在 IDA 输出窗口查看 instance id 和本地端点。
 
-The next major risk area is expanding destructive mutation tests beyond the current fixed sample and patch target while keeping database isolation, fingerprint checks, and rollback/cleanup guarantees explicit.
+示例：
+
+```text
+[IDA-Script-MCP] Server started at http://127.0.0.1:13338
+[IDA-Script-MCP] Instance ID: 2540_test1.dll
+[IDA-Script-MCP] Metadata endpoint: GET http://127.0.0.1:13338/metadata
+[IDA-Script-MCP] Functions endpoint: POST http://127.0.0.1:13338/functions
+[IDA-Script-MCP] Decompile endpoint: POST http://127.0.0.1:13338/decompile
+[IDA-Script-MCP] Xrefs endpoint: POST http://127.0.0.1:13338/xrefs
+[IDA-Script-MCP] Inspect address endpoint: POST http://127.0.0.1:13338/inspect_address
+[IDA-Script-MCP] Execute endpoint disabled by default; use isolated worker execution
+[IDA-Script-MCP] Apply changes endpoint: POST http://127.0.0.1:13338/apply_changes
+```
+
+## MCP 工具
+
+当前暴露 7 个 MCP 工具：
+
+| 工具 | 用途 | 是否写入 |
+| --- | --- | --- |
+| `list_ida_instances` | 列出正在运行的 IDA 插件实例。 | 否 |
+| `get_ida_database_info` | 返回数据库路径、hash、dirty 状态、imagebase、处理器等信息。 | 否 |
+| `list_functions` | 分页/过滤函数列表。 | 否 |
+| `decompile_function` | 按地址或名称反编译函数，可附带反汇编。 | 否 |
+| `get_xrefs` | 查询到某地址/符号或从某地址/符号发出的 xref。 | 否 |
+| `execute_idapython` | 在隔离 worker IDA 中执行自定义 IDAPython。 | 只写 worker 副本 |
+| `apply_worker_changes` | 预览或回放 worker 产生的 ChangeSet。 | 可选 |
+
+多 IDA 实例时，先调用 `list_ida_instances`，再把 `instance_id` 或 `port` 传给后续工具。
+也可以用 `IDA_SCRIPT_MCP_INSTANCE_ID` 或 `IDA_SCRIPT_MCP_PORT` 设置 MCP server 的默认目标。
+
+## 推荐读取流程
+
+1. `list_ida_instances`
+2. `get_ida_database_info`
+3. `list_functions`
+4. `decompile_function`
+5. `get_xrefs`
+
+这些只读工具应优先于临时生成 IDAPython。
+
+## 隔离 IDAPython 执行
+
+public `execute_idapython` 不再走 GUI `/execute`。执行流程是：复制当前已保存的 IDB/I64，启动 headless IDA worker，
+在副本中运行脚本，收集结果和变更。
+
+worker executable 发现规则是破坏式、无兜底的：
+
+1. 解析当前服务的 GUI IDA 实例。
+2. 从实例登记信息拿 PID。
+3. 根据 PID 解析 GUI executable path。
+4. executable basename 必须是 `ida64.exe`。
+5. 同目录必须有 `idat64.exe`。
+6. 用这个 `idat64.exe` 启动 worker。
+
+不会再回退到 `IDA_SCRIPT_MCP_IDA_PATH`、`IDA_SCRIPT_MCP_WORKER_MODE` 或 `PATH`。缺 PID、缺 exe path、GUI 不是
+`ida64.exe`、同目录没有 `idat64.exe`，都会直接返回 `worker_start_error`，在开发阶段暴露问题。
+
+GUI 数据库也必须是已知干净状态。执行前请保存数据库；dirty 或 dirty 状态未知时会拒绝执行。
+
+常见状态包括：`ok`、`timeout`、`script_error`、`source_error`、`worker_start_error`、`worker_crashed`、
+`worker_result_missing`、`recorder_error`、`rejected`。
+
+## worker 变更和回放
+
+worker 脚本可以正常使用 IDAPython。运行时会把部分数据库写操作记录为结构化 ChangeSet：
+
+- `rename`
+- `comment`
+- `function_comment`
+- `set_type`
+- `patch_bytes`
+
+建议流程：
+
+1. 运行 `execute_idapython`，检查 `changes`。
+2. 调用 `apply_worker_changes` 并保持 `dry_run=true` 预览。
+3. 确认后再设置 `dry_run=false` 回放到 GUI 数据库。
+
+回放前会校验 GUI 数据库 fingerprint，避免把 worker 变更应用到错误数据库。
+
+## 安全边界
+
+- 插件默认绑定 `127.0.0.1`。
+- public `execute_idapython` 使用隔离 worker；GUI `/execute` 默认禁用。
+- 自定义 IDAPython 仍然是任意代码，只应接受可信用户/助手的脚本。
+- `apply_worker_changes(dry_run=false)` 会修改当前 GUI 数据库。
+- 执行前保持数据库已保存且干净。
+
+内部测试可通过 `IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE` 打开 legacy GUI `/execute`，但这不是常规工作流。
+
+## 常用环境变量
+
+| 变量 | 用途 |
+| --- | --- |
+| `IDA_SCRIPT_MCP_HOST` | IDA 插件 host，默认 `127.0.0.1`。 |
+| `IDA_SCRIPT_MCP_PORT` | 默认目标端口。 |
+| `IDA_SCRIPT_MCP_INSTANCE_ID` | 默认目标实例 id。 |
+| `IDA_SCRIPT_MCP_WORK_DIR` | 隔离 worker job 目录。 |
+| `IDA_SCRIPT_MCP_KEEP_JOBS` | 设为 `1` 时保留 worker artifacts。 |
+| `IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE` | 启用 legacy GUI `/execute`，不推荐。 |
+
+`IDA_SCRIPT_MCP_IDA_PATH` 和 `IDA_SCRIPT_MCP_WORKER_MODE` 不再参与 public worker discovery。
+
+## disposable VM 测试
+
+仓库包含面向自托管 Windows runner 的 disposable VM 测试框架。入口包括：
+
+- `ida-script-mcp-vm-host-controller`
+- `ida-script-mcp-vm-guest-agent`
+- `.github/workflows/disposable-vm-guest-agent-smoke.yml`
+
+workflow 覆盖插件安装、API 读取、worker 生命周期、worker failure matrix、复杂变更回放，以及 GUI 派生 worker discovery 实机验证。
+
+## 许可证
+
+MIT License
