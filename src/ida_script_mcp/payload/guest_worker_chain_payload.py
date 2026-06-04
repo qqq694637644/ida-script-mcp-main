@@ -972,6 +972,331 @@ def _run_worker_failure_matrix(
     _stage("worker_failure_matrix_done", matrix)
 
 
+def _run_u012_set_type_complex(
+    ready: dict,
+    base_url: str,
+    ida_dir: Path,
+    user_script: Path,
+    result: dict,
+) -> None:
+    health = _health_with_retry(base_url)
+    result["responses"]["health"] = health["body"]
+    _check(result, "health reports plugin name", health["body"].get("plugin") == "IDA-Script-MCP", health["body"])
+
+    metadata_before = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+    result["responses"]["metadata_before"] = metadata_before["body"]
+    _check(
+        result,
+        "metadata clean before U012",
+        metadata_before["body"].get("dirty_state_known") is True
+        and metadata_before["body"].get("dirty") is False,
+        metadata_before["body"],
+    )
+    database_sha256 = metadata_before["body"].get("database_sha256")
+    _check(result, "metadata includes database_sha256", bool(database_sha256), metadata_before["body"])
+
+    functions_page = _json_request(
+        "POST",
+        base_url,
+        "/functions",
+        {"offset": 0, "limit": 20, "include_thunks": True, "include_library_functions": True},
+        expected_status=200,
+        timeout=10,
+    )
+    result["responses"]["functions_page"] = functions_page["body"]
+    functions = functions_page["body"].get("functions") or []
+    _check(result, "U012 has target function", bool(functions), functions_page["body"])
+
+    target_ea = int(functions[0]["start_ea"])
+    target_hex = hex(target_ea)
+    inspect_before = _json_request(
+        "POST",
+        base_url,
+        "/inspect_address",
+        {"address": target_hex, "byte_count": 8},
+        expected_status=200,
+        timeout=10,
+    )
+    result["responses"]["inspect_before"] = inspect_before["body"]
+    before_body = inspect_before["body"]
+    _check(result, "U012 inspect before resolves target", before_body.get("found") is True, before_body)
+
+    run_id = str(int(time.time()))
+    final_name = f"u012_fastcall_final_{run_id}"
+    valid_declarations = [
+        {
+            "label": "cdecl_pointer_array",
+            "decl": f"int __cdecl u012_cdecl_{run_id}(char *buffer, int values[4]);",
+            "flags": 0,
+        },
+        {
+            "label": "stdcall_pointer_overwrite",
+            "decl": f"int __stdcall u012_stdcall_{run_id}(const char *name, unsigned int count);",
+            "flags": 0,
+        },
+        {
+            "label": "fastcall_function_pointer_overwrite",
+            "decl": (
+                f"__int64 __fastcall {final_name}"
+                "(void *ctx, int (__cdecl *callback)(int, void *), unsigned int flags);"
+            ),
+            "flags": 0,
+        },
+    ]
+
+    runtime_root = _install_runtime_package_files()
+    worker_ida = _select_worker_ida_executable(ida_dir)
+    worker_jobs = WORK_DIR / "u012_set_type_jobs"
+    env_keys = [
+        "IDA_SCRIPT_MCP_IDA_PATH",
+        "IDA_SCRIPT_MCP_WORK_DIR",
+        "IDA_SCRIPT_MCP_KEEP_JOBS",
+        "IDA_SCRIPT_MCP_U012_TARGET_EA",
+        "IDA_SCRIPT_MCP_U012_DECLS_JSON",
+    ]
+    previous_env = {key: os.environ.get(key) for key in env_keys}
+    os.environ["IDA_SCRIPT_MCP_IDA_PATH"] = str(worker_ida)
+    os.environ["IDA_SCRIPT_MCP_WORK_DIR"] = str(worker_jobs)
+    os.environ["IDA_SCRIPT_MCP_KEEP_JOBS"] = "1"
+    os.environ["IDA_SCRIPT_MCP_U012_TARGET_EA"] = target_hex
+    os.environ["IDA_SCRIPT_MCP_U012_DECLS_JSON"] = json.dumps(valid_declarations)
+    _stage(
+        "u012_set_type_runtime_prepare_done",
+        {
+            "runtime_root": str(runtime_root),
+            "worker_ida": str(worker_ida),
+            "user_script": str(user_script),
+            "target_ea": target_hex,
+            "valid_declarations": valid_declarations,
+        },
+    )
+
+    try:
+        import asyncio
+        from ida_script_mcp import server as mcp_server
+
+        class ExecuteParams:
+            instance_id = None
+            port = int(ready["port"])
+            code = None
+            script_path = str(user_script)
+            capture_output = True
+            timeout_seconds = 90
+            collect_changes = True
+
+            def to_execute_request(self):
+                return mcp_server.ExecuteRequest.model_validate(
+                    {
+                        "code": self.code,
+                        "script_path": self.script_path,
+                        "capture_output": self.capture_output,
+                        "timeout_seconds": self.timeout_seconds,
+                    }
+                )
+
+        class ApplyParams:
+            instance_id = None
+
+            def __init__(self, payload: dict):
+                self._payload = dict(payload)
+                self.port = int(self._payload.get("port") or ready["port"])
+
+            def model_dump(self, mode="json", exclude=None):
+                exclude = exclude or set()
+                return {key: value for key, value in self._payload.items() if key not in exclude}
+
+        def apply_payload(job_id: str, operations: list[dict], *, dry_run: bool) -> dict:
+            return {
+                "schema_version": 1,
+                "job_id": job_id,
+                "database_fingerprint": {"database_sha256": database_sha256},
+                "operations": operations,
+                "dry_run": dry_run,
+                "port": int(ready["port"]),
+            }
+
+        def assert_clean_after_failed_case(case_name: str) -> None:
+            metadata_after = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+            result["responses"][f"metadata_after_{case_name}"] = metadata_after["body"]
+            _check(
+                result,
+                f"metadata stays clean after {case_name}",
+                metadata_after["body"].get("dirty") is False,
+                metadata_after["body"],
+            )
+
+        def apply_expected_error(case_name: str, operation: dict) -> dict:
+            payload = apply_payload(f"u012-{case_name}-{run_id}", [operation], dry_run=False)
+            response = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(payload)))
+            result["responses"][f"u012_{case_name}"] = response
+            _check(result, f"{case_name} returns error", response.get("status") == "error", response)
+            _check(result, f"{case_name} applies nothing", response.get("applied") == [], response)
+            _check(result, f"{case_name} has one operation error", len(response.get("errors") or []) == 1, response)
+            assert_clean_after_failed_case(case_name)
+            return response
+
+        _stage("u012_set_type_execute_start", {"port": int(ready["port"])})
+        execute_result = asyncio.run(mcp_server.execute_idapython(ExecuteParams()))
+        result["responses"]["execute_idapython_u012_set_type"] = execute_result
+        _check(result, "U012 execute status ok", execute_result.get("status") == "ok", execute_result)
+        _check(result, "U012 execute isolated true", execute_result.get("isolated") is True, execute_result)
+        _check(result, "U012 execute job_id present", bool(execute_result.get("job_id")), execute_result)
+        script_result = execute_result.get("result") or {}
+        idc_aliases = script_result.get("idc_type_aliases") or {}
+        _check(
+            result,
+            "U012 worker saw at least one IDC type alias",
+            idc_aliases.get("has_set_type") is True or idc_aliases.get("has_SetType") is True,
+            idc_aliases,
+        )
+        changes = execute_result.get("changes") or []
+        _check(result, "U012 execute produced set_type changes", len(changes) == len(valid_declarations), execute_result)
+        _stage(
+            "u012_set_type_execute_done",
+            {"job_id": execute_result.get("job_id"), "change_count": len(changes), "idc_aliases": idc_aliases},
+        )
+
+        artifacts = execute_result.get("artifacts") or {}
+        changes_path = artifacts.get("changes")
+        _check(result, "U012 changes artifact path present", bool(changes_path), artifacts)
+        change_set = json.loads(Path(changes_path).read_text(encoding="utf-8"))
+        operations = change_set.get("operations") or []
+        operation_decls = [operation.get("decl") for operation in operations]
+        expected_decls = [item["decl"] for item in valid_declarations]
+        result["u012_set_type_summary"] = {
+            "target_ea": target_hex,
+            "operation_count": len(operations),
+            "operation_types": [operation.get("op") for operation in operations],
+            "operation_decls": operation_decls,
+            "idc_type_aliases": idc_aliases,
+            "final_decl": expected_decls[-1],
+        }
+        _check(result, "U012 changes artifact matches job", change_set.get("job_id") == execute_result.get("job_id"), change_set)
+        _check(result, "U012 fingerprint matches metadata", (change_set.get("database_fingerprint") or {}).get("database_sha256") == database_sha256, change_set)
+        _check(result, "U012 operations are set_type", all(op.get("op") == "set_type" for op in operations), operations)
+        _check(result, "U012 operation decls preserve order", operation_decls == expected_decls, operations)
+
+        invalid_decl_operation = {
+            "op_id": "op-u012-invalid-cdecl",
+            "op": "set_type",
+            "ea": target_ea,
+            "source": "explicit_api",
+            "decl": "this is not a valid C declaration !!!",
+            "flags": 0,
+        }
+        invalid_decl = apply_expected_error("invalid_cdecl", invalid_decl_operation)
+        invalid_message = " ".join(item.get("message", "") for item in invalid_decl.get("errors") or [])
+        _check(
+            result,
+            "invalid C declaration reports type apply failure",
+            "failure" in invalid_message.lower() or "raised" in invalid_message.lower(),
+            invalid_decl,
+        )
+
+        dry_payload = json.loads(json.dumps(change_set))
+        dry_payload["dry_run"] = True
+        dry_payload["port"] = int(ready["port"])
+        dry_result = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(dry_payload)))
+        result["responses"]["u012_apply_worker_changes_dry_run"] = dry_result
+        _check(result, "U012 dry-run status ok", dry_result.get("status") == "ok", dry_result)
+        _check(result, "U012 dry-run applies nothing", dry_result.get("applied") == [], dry_result)
+        _check(result, "U012 dry-run skips all operations", len(dry_result.get("skipped") or []) == len(operations), dry_result)
+
+        inspect_after_dry = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["inspect_after_u012_dry_run"] = inspect_after_dry["body"]
+        _check(
+            result,
+            "U012 dry-run leaves type unchanged",
+            inspect_after_dry["body"].get("type") == before_body.get("type"),
+            inspect_after_dry["body"],
+        )
+
+        apply_change_set = json.loads(json.dumps(change_set))
+        apply_change_set["dry_run"] = False
+        apply_change_set["port"] = int(ready["port"])
+        apply_result = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(apply_change_set)))
+        result["responses"]["u012_apply_worker_changes_destructive"] = apply_result
+        _check(result, "U012 destructive apply status ok", apply_result.get("status") == "ok", apply_result)
+        _check(result, "U012 destructive apply applies all operations", len(apply_result.get("applied") or []) == len(operations), apply_result)
+        _check(result, "U012 destructive apply has no errors", apply_result.get("errors") == [], apply_result)
+
+        inspect_after_apply = _json_request(
+            "POST",
+            base_url,
+            "/inspect_address",
+            {"address": target_hex, "byte_count": 8},
+            expected_status=200,
+            timeout=10,
+        )
+        result["responses"]["inspect_after_u012_apply"] = inspect_after_apply["body"]
+        type_text = inspect_after_apply["body"].get("type") or ""
+        _check(
+            result,
+            "U012 final set_type is inspectable",
+            final_name in type_text or "__int64" in type_text or "fastcall" in type_text.lower(),
+            {"type": type_text, "final_name": final_name, "final_decl": expected_decls[-1]},
+        )
+
+        metadata_after_apply = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+        result["responses"]["metadata_after_u012_apply"] = metadata_after_apply["body"]
+        _check(result, "U012 metadata dirty after destructive apply", metadata_after_apply["body"].get("dirty") is True, metadata_after_apply["body"])
+
+        nonfunction_operation = {
+            "op_id": "op-u012-nonfunction-address",
+            "op": "set_type",
+            "ea": 1,
+            "source": "explicit_api",
+            "decl": f"int __cdecl u012_nonfunction_{run_id}(void);",
+            "flags": 0,
+        }
+        nonfunction_payload = apply_payload(
+            f"u012-nonfunction_address-{run_id}",
+            [nonfunction_operation],
+            dry_run=False,
+        )
+        nonfunction = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(nonfunction_payload)))
+        result["responses"]["u012_nonfunction_address"] = nonfunction
+        nonfunction_outcome_count = len(nonfunction.get("applied") or []) + len(nonfunction.get("errors") or [])
+        nonfunction_status = nonfunction.get("status")
+        result["u012_set_type_summary"]["nonfunction_address_status"] = nonfunction_status
+        result["u012_set_type_summary"]["nonfunction_address_applied"] = len(nonfunction.get("applied") or [])
+        result["u012_set_type_summary"]["nonfunction_address_errors"] = len(nonfunction.get("errors") or [])
+        _check(
+            result,
+            "U012 non-function set_type returns a terminal status",
+            nonfunction_status in {"ok", "error", "rejected"},
+            nonfunction,
+        )
+        if nonfunction_status == "rejected":
+            _check(
+                result,
+                "U012 non-function set_type rejection explains dirty database",
+                "unsaved changes" in (nonfunction.get("message") or "").lower(),
+                nonfunction,
+            )
+        else:
+            _check(
+                result,
+                "U012 non-function set_type reports one operation outcome",
+                nonfunction_outcome_count == 1,
+                nonfunction,
+            )
+        _stage("u012_set_type_complex_done", result["u012_set_type_summary"])
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def _read_process_pipes(process: subprocess.Popen) -> tuple[str, str]:
     try:
         stdout, stderr = process.communicate(timeout=10)
@@ -1028,6 +1353,8 @@ def main() -> int:
             _run_worker_timeout(ready, str(ready["base_url"]), ida_dir, user_script, result)
         elif TEST_MODE == "worker_failure_matrix":
             _run_worker_failure_matrix(ready, str(ready["base_url"]), ida_dir, user_scripts, result)
+        elif TEST_MODE == "u012_set_type_complex":
+            _run_u012_set_type_complex(ready, str(ready["base_url"]), ida_dir, user_script, result)
         elif TEST_MODE == "worker_chain":
             _run_worker_chain(ready, str(ready["base_url"]), ida_dir, user_script, result)
         else:

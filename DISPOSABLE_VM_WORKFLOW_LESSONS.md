@@ -621,6 +621,10 @@ dedicated action/mode, not default full smoke
 | `26926388631` | `d1a0cde...` | Success | U009 /inspect_address system test passed; artifact `7401596027`. |
 | `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
 | `26926417574` | `ac7cbab...` | Success | U013 patch_bytes complex cases passed; artifact `7401627652`. |
+| `26926180741` | `d764ecd...` | Failure | U012 first attempt proved worker generated 3 ordered `set_type` operations and invalid declaration failed correctly, but the test incorrectly assumed `set_type` at `ea=1` must fail while clean IDA 8.3 accepted it. |
+| `26926363238` | `56051ef...` | Failure | U012 second attempt proved dry-run and destructive replay applied all 3 operations, but the post-apply non-function probe was correctly rejected because the GUI database was dirty. |
+| `26926517859` | `5bc828b...` | Success | U012 set_type complex cases passed before handoff-doc migration; artifact `7401637998`. |
+| `26927371932` | `d59cc0c...` | Success | U012 set_type complex cases passed again after moving U012 into tested/handoff docs; artifact `7401910040`. |
 
 ## Current conclusion
 
@@ -632,12 +636,12 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U009 `/inspect_address` system behavior, and U013 patch_bytes complex cases are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U009 `/inspect_address` system behavior, U012 worker-generated `set_type` complex replay, and U013 patch_bytes complex cases are now verified separately.
 
 The remaining backlog after U013 includes:
 
 ```text
-U010/U011/U012/U014 apply_changes corner cases
+U010/U011/U014 apply_changes corner cases
 U006R fixture-dependent `/functions` residuals
 read-only endpoint corner cases
 installer/client config coverage

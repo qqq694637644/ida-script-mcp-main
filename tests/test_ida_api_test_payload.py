@@ -240,6 +240,25 @@ def test_build_guest_ida_worker_failure_matrix_script_contains_checked_sources()
     compile(script, "<generated_worker_failure_matrix_payload>", "exec")
 
 
+def test_build_guest_u012_set_type_complex_script_contains_checked_sources() -> None:
+    script = build_guest_ida_worker_chain_test_script(test_mode="u012_set_type_complex")
+
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in script
+    assert "WORKER_CHAIN_STAGE=" in script
+    assert 'TEST_MODE = "u012_set_type_complex"' in script
+    assert "u012_set_type_complex_worker_script.py" in script
+    assert "IDA_SCRIPT_MCP_U012_TARGET_EA" in script
+    assert "IDA_SCRIPT_MCP_U012_DECLS_JSON" in script
+    assert "u012_set_type_runtime_prepare_done" in script
+    assert "invalid_cdecl" in script
+    assert "nonfunction_address" in script
+    assert "U012 final set_type is inspectable" in script
+    assert "__TEST_MODE_JSON__" not in script
+    assert "__USER_SCRIPT_FILENAME_JSON__" not in script
+    assert "__USER_SCRIPT_B64_JSON__" not in script
+    compile(script, "<generated_u012_set_type_complex_payload>", "exec")
+
+
 def test_build_guest_u004_real_mcp_client_script_contains_checked_sources() -> None:
     script = build_guest_u004_real_mcp_client_test_script()
 
@@ -421,6 +440,18 @@ def test_disposable_vm_workflow_exposes_u013_patch_bytes_complex_action() -> Non
     assert "ida_plugin_u013_patch_bytes_complex_test" in workflow
     assert "U013_patch_bytes_complex_cases.py" in workflow
     assert "ida_script_mcp.payload.ida_u013_patch_bytes_complex_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u012_set_type_complex_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u012_set_type_complex_test" in workflow
+    assert "U012_set_type_complex.py" in workflow
+    assert "--test-mode u012_set_type_complex" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
