@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。现在建议从 `UNTESTED.md` 中 U004 真实 MCP client 端到端开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U006 `/functions` 主要 corner-case 语义已由 workflow run `26925694907` 通过并移入 `TESTED.md`；只剩 U006R fixture-dependent residuals。现在建议从 `UNTESTED.md` 中 U004 真实 MCP client 端到端、U005 多实例选择，或 U007 `/decompile` corner case 开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -343,6 +343,24 @@ rejected: GUI dirty 后 execute_idapython 被拒绝且未启动 worker
 ```
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U003，除非修改了 worker failure classification 逻辑。
+
+### U006：`/functions` corner case（主要语义已通过）
+
+Run `26925694907` 已验证：
+
+```text
+ida_api_test_mode=functions_corner
+/functions include_thunks/include_library_functions 2x2 matrix
+/functions segment=.text filter and missing segment
+/functions name_contains case-insensitive probe
+/functions Unicode/special name_contains probe
+/functions numeric string offset/limit and boolean strings
+/functions limit=0/-1/5001/non-int -> structured HTTP 400
+/functions offset=-1/non-int -> structured HTTP 400
+/functions name_contains/segment/boolean flag type errors -> structured HTTP 400
+```
+
+证据已经移入 `TESTED.md`。第一次 run `26925551740` 的断言已经通过但最终 stdout 因 GBK 无法输出 `☃` 而失败；修复经验已经写入 `DISPOSABLE_VM_WORKFLOW_LESSONS.md`。后续不要重复跑 U006 主语义，除非修改了 `/functions` validation/listing 逻辑。仍需新 fixture 才能测 U006R：空数据库、巨大函数数量分页、重复函数名或 demangled 名称。
 
 ## 8. 失败排查顺序
 

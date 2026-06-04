@@ -59,6 +59,7 @@ restore_extra_args_json=[]
 | U001 full V2.3 worker replay chain | Passed | `26922985347`, artifact `7400373325` |
 | U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
+| U006 `/functions` corner cases | Passed | `26925694907`, artifact `7401369820` |
 
 ### Final full-smoke coverage
 
@@ -172,6 +173,32 @@ artifact=disposable-vm-guest-agent-smoke / 7400695878
 ```
 
 This verifies the main structured failure classifications for isolated worker execution.
+
+Run `26925694907` covered U006, the main `/functions` corner-case semantics, after fixing a Windows console encoding issue found in run `26925551740`:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=functions_corner
+payload status=passed
+functions_page.total=130
+functions include_thunks/include_library_functions 2x2 matrix passed
+segment=.text filter returned only .text functions
+missing segment returned returned=0, functions=[]
+name_contains=SUB_ matched case-insensitively
+Unicode/special name_contains="\\u2603_unlikely_*[]" returned a valid empty page
+numeric string params accepted offset="0" and limit="2"
+boolean strings accepted include_thunks="false" and include_library_functions="true"
+limit=0/-1/5001/non-int returned HTTP 400 field=limit
+offset=-1/non-int returned HTTP 400 field=offset
+name_contains/segment non-string returned HTTP 400 with field names
+invalid boolean flags returned HTTP 400 with field names
+artifact=disposable-vm-guest-agent-smoke / 7401369820
+```
+
+Fixture-dependent `/functions` residuals remain: empty database / 0 functions, huge function-count pagination, duplicate function names, and demangled-name fixtures.
 
 ## Failure lessons and fixes
 
@@ -389,6 +416,31 @@ Rule:
 - Do not fail IDA-Script-MCP smoke because unrelated third-party plugin warnings appear.
 - Do fail if `IDA-Script-MCP` support files produce `PLUGIN_ENTRY` or import errors.
 
+### 9. Windows guest stdout may use GBK; escape non-ASCII JSON printed to console
+
+Symptom in run `26925551740`:
+
+```text
+IDA_API_STAGE reached functions_corner_tests_done
+api_tests_done status=passed
+IDA_PLUGIN_API_TEST_ERROR={"type":"UnicodeEncodeError", "message":"'gbk' codec can't encode character '\\u2603' ..."}
+```
+
+Root cause:
+
+- U006 intentionally sent a Unicode/special `name_contains` probe containing `☃`.
+- The payload wrote UTF-8 result files correctly, but the final `print("IDA_PLUGIN_API_TEST_RESULT=" + json.dumps(..., ensure_ascii=False))` tried to write raw `☃` to a Windows console using GBK.
+
+Fix:
+
+- Keep artifact/result files as UTF-8.
+- Use `ensure_ascii=True` for JSON printed to stdout/stderr (`IDA_API_STAGE`, `IDA_PLUGIN_API_TEST_RESULT`, `IDA_PLUGIN_API_TEST_ERROR`).
+
+Rule:
+
+- Payload console output must be transport-safe ASCII, because guest console encoding is not guaranteed to be UTF-8.
+- Do not remove Unicode endpoint probes; escape them at the console boundary instead.
+
 ## Practical workflow rules for the next tests
 
 ### Start with the smallest mode
@@ -453,6 +505,8 @@ dedicated action/mode, not default full smoke
 | `26923418555` | `0f689dc...` | Success | U002 worker hard-timeout/kill-tree passed; artifact `7400538789`. |
 | `26923741508` | `409ced2...` | Failure | U003 payload failed before first matrix case due nested class `script_path` name resolution. |
 | `26923830535` | `fa086d2...` | Success | U003 worker failure-state matrix passed; artifact `7400695878`. |
+| `26925551740` | `df09bff...` | Failure | U006 assertions passed, then final stdout failed on GBK `UnicodeEncodeError` for `☃`. |
+| `26925694907` | `231cd63...` | Success | U006 `/functions` corner-case mode passed; artifact `7401369820`. |
 
 ## Current conclusion
 
@@ -464,12 +518,13 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, and the U003 worker failure-state matrix are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, and the U006 `/functions` main corner-case semantics are now verified separately.
 
 The remaining backlog starts after the core V2.3 worker lifecycle work. Next likely areas are:
 
 ```text
 U004 real MCP client end-to-end
 U005 multi-IDA instance selection
+U006R fixture-dependent `/functions` residuals
 apply_changes/read-only endpoint corner cases
 ```

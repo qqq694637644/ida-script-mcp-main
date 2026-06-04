@@ -14,7 +14,7 @@ U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
 ```
 
-下一轮建议从 MCP 层 U004 开始；也可以按风险优先选择 U005 多实例或 apply_changes corner cases。
+U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 MCP 层 U004 开始；也可以按风险优先选择 U005 多实例或 U007+ read-only endpoint corner cases。
 
 ## MCP 层未测
 
@@ -53,19 +53,15 @@ U003 worker failure-state matrix
 
 ## read-only endpoint corner case
 
-- [ ] **U006 `/functions` corner case**
+- [ ] **U006R `/functions` fixture-dependent residuals**
 
   ```text
   空数据库 / 0 function
   巨大函数数量分页
-  segment 过滤
-  include_thunks=false/true
-  include_library_functions=false/true
-  name_contains 大小写/Unicode/特殊字符
-  limit 边界：0、负数、超大值
-  offset 负数
   函数名重复或 demangled 名称
   ```
+
+  已覆盖并移入 `TESTED.md` 的 U006 范围：segment 过滤、include_thunks/include_library_functions matrix、name_contains 大小写/Unicode/特殊字符输入、limit=0/负数/超大值/非整数、offset 负数/非整数、name_contains/segment/boolean flag 类型错误、numeric string 参数。
 
 - [ ] **U007 `/decompile` corner case**
 
