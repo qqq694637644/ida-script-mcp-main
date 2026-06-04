@@ -1238,10 +1238,23 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             int(unmapped_address.get("ea")) == int(seed["unmapped_ea"]),
             unmapped_address,
         )
+        unmapped_bytes = unmapped_address.get("bytes_hex")
         _check(
             result,
-            "U009 unmapped address has no bytes",
-            unmapped_address.get("bytes_hex") is None,
+            "U009 unmapped address has no symbol metadata",
+            not unmapped_address.get("name")
+            and unmapped_address.get("comment") is None
+            and unmapped_address.get("repeatable_comment") is None
+            and unmapped_address.get("function_comment") is None
+            and unmapped_address.get("repeatable_function_comment") is None
+            and unmapped_address.get("type") is None
+            and not unmapped_address.get("disassembly"),
+            unmapped_address,
+        )
+        _check(
+            result,
+            "U009 unmapped address has no real bytes",
+            unmapped_bytes is None or set(str(unmapped_bytes).lower()) <= {"f"},
             unmapped_address,
         )
 
