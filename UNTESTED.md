@@ -6,7 +6,7 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、多 IDA 实例选择 U005、`/functions` 主要 corner case U006、`/decompile` corner case U007、`/inspect_address` 系统测试 U009、comment/function_comment 复杂情况 U011、以及 patch_bytes 复杂情况 U013 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、多 IDA 实例选择 U005、`/functions` 主要 corner case U006、`/decompile` corner case U007、`/xrefs` corner case U008、`/inspect_address` 系统测试 U009、comment/function_comment 复杂情况 U011、以及 patch_bytes 复杂情况 U013 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
@@ -16,12 +16,13 @@ U004 real MCP client end-to-end
 U005 multi-IDA instance selection
 U006 /functions main corner case
 U007 /decompile corner case
+U008 /xrefs corner case
 U009 /inspect_address system test
 U011 comment / function_comment complex
 U013 patch_bytes complex cases
 ```
 
-U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 U006R、U008 `/xrefs`、U010/U012/U014 apply_changes、installer / client config coverage 开始。U009/U011 已完成，不要重复跑。
+U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 U006R、U010/U012/U014 apply_changes、installer / client config coverage 开始。U008/U009/U011 已完成，不要重复跑。
 
 
 ## 已测项目的专门环境补测
@@ -67,19 +68,6 @@ U007 已在当前 disposable VM + `test1.dll` 基线上通过并移入 `TESTED.m
   ```
 
   已覆盖并移入 `TESTED.md` 的 U006 范围：segment 过滤、include_thunks/include_library_functions matrix、name_contains 大小写/Unicode/特殊字符输入、limit=0/负数/超大值/非整数、offset 负数/非整数、name_contains/segment/boolean flag 类型错误、numeric string 参数。
-
-- [ ] **U008 `/xrefs` corner case**
-
-  ```text
-  code/data/flow 三种 xref_kind 的真实过滤
-  大量 xrefs 超过 limit
-  limit=0/负数/超大值
-  name 查询
-  name 不存在
-  地址是 import thunk
-  地址是 string/data
-  自引用/循环引用
-  ```
 
 
 ## apply_changes 未测风险点

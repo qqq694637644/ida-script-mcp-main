@@ -63,6 +63,7 @@ restore_extra_args_json=[]
 | U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
 | U006 `/functions` corner cases | Passed | `26925694907`, artifact `7401369820` |
 | U011 comment/function_comment complex cases | Passed | `26926598576`, artifact `7401657997` |
+| U008 `/xrefs` corner case | Passed | `26926339324`, artifact `7401576197` |
 | U013 patch_bytes complex cases | Passed | `26926417574`, artifact `7401627652` |
 
 ### Final full-smoke coverage
@@ -681,7 +682,7 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U009 `/inspect_address` system behavior, U011 comment/function_comment complex cases, and U013 patch_bytes complex cases are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U008 `/xrefs` corner cases, U009 `/inspect_address` system behavior, U011 comment/function_comment complex cases, and U013 patch_bytes complex cases are now verified separately.
 
 The remaining backlog after U011/U013 includes:
 
