@@ -40,6 +40,21 @@ def _gui_context(db_path: Path, **extra):
     }
 
 
+def _gui_and_worker(tmp_path: Path) -> tuple[Path, Path]:
+    ida_dir = tmp_path / "ida"
+    ida_dir.mkdir(exist_ok=True)
+    gui_ida = ida_dir / "ida64.exe"
+    gui_ida.write_text("gui", encoding="utf-8")
+    worker_ida = ida_dir / "idat64.exe"
+    worker_ida.write_text("worker", encoding="utf-8")
+    return gui_ida, worker_ida
+
+
+def _worker_gui_context(tmp_path: Path, db_path: Path, **extra):
+    gui_ida, worker_ida = _gui_and_worker(tmp_path)
+    return _gui_context(db_path, gui_executable_path=str(gui_ida), **extra), worker_ida
+
+
 def test_dirty_gui_database_is_rejected_without_launch(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
@@ -50,9 +65,7 @@ def test_dirty_gui_database_is_rejected_without_launch(tmp_path):
         launched = True
         return FakeProcess()
 
-    manager = IsolatedExecutionManager(
-        work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen
-    )
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
     result = manager.execute(
         ExecuteRequest(code="1"),
         gui_context=_gui_context(db, dirty=True),
@@ -74,9 +87,7 @@ def test_unknown_dirty_state_is_rejected_without_launch(tmp_path):
         launched = True
         return FakeProcess()
 
-    manager = IsolatedExecutionManager(
-        work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen
-    )
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
     result = manager.execute(
         ExecuteRequest(code="1"),
         gui_context=_gui_context(db, dirty=None, unsaved=None, dirty_state_known=False),
@@ -99,9 +110,7 @@ def test_missing_database_identity_is_source_error_without_launch(tmp_path):
         launched = True
         return FakeProcess()
 
-    manager = IsolatedExecutionManager(
-        work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing", popen=popen
-    )
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
     result = manager.execute(
         ExecuteRequest(code="1"),
         gui_context=_gui_context(db, database_identity_known=False),
@@ -114,10 +123,10 @@ def test_missing_database_identity_is_source_error_without_launch(tmp_path):
     assert launched is False
 
 
-def test_missing_ida_path_returns_worker_start_error(tmp_path):
+def test_missing_gui_executable_path_returns_worker_start_error(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=tmp_path / "missing")
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs")
 
     result = manager.execute(
         ExecuteRequest(code="1"),
@@ -127,15 +136,15 @@ def test_missing_ida_path_returns_worker_start_error(tmp_path):
     )
 
     assert result.status == "worker_start_error"
-    assert "IDA_SCRIPT_MCP_IDA_PATH" in result.error.message
+    assert result.error.type == "GuiExecutablePathUnavailable"
+    assert "gui_executable_path" in result.error.message
 
 
 def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path, monkeypatch):
     monkeypatch.setenv("IDA_SCRIPT_MCP_KEEP_JOBS", "1")
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, worker_ida = _worker_gui_context(tmp_path, db)
     captured = {}
 
     def popen(args, **kwargs):
@@ -170,16 +179,16 @@ def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path, monk
         )
         return FakeProcess(exit_code=0)
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
     result = manager.execute(
         ExecuteRequest(code="result = 7"),
-        gui_context=_gui_context(db),
+        gui_context=gui_context,
         instance_id="sample",
         port=13338,
     )
 
     assert isinstance(captured["args"], list)
-    assert captured["args"][0] == str(ida)
+    assert captured["args"][0] == str(worker_ida)
     assert captured["args"][1] == "-A"
     assert result.status == "ok"
     assert result.result == 7
@@ -222,7 +231,38 @@ def test_worker_discovery_prefers_gui_executable_directory(tmp_path, monkeypatch
     assert result.status == "ok"
 
 
-def test_worker_discovery_falls_back_to_env_when_gui_directory_has_no_worker(
+def test_worker_discovery_rejects_non_ida64_gui_executable(
+    tmp_path, monkeypatch
+):
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    ida_dir = tmp_path / "ida"
+    ida_dir.mkdir()
+    gui_ida = ida_dir / "ida.exe"
+    gui_ida.write_text("gui", encoding="utf-8")
+    (ida_dir / "idat64.exe").write_text("worker", encoding="utf-8")
+    monkeypatch.setenv("IDA_SCRIPT_MCP_IDA_PATH", str(ida_dir / "idat64.exe"))
+    launched = False
+
+    def popen(args, **kwargs):
+        nonlocal launched
+        launched = True
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db, gui_executable_path=str(gui_ida)),
+        instance_id="sample",
+        port=13338,
+    )
+
+    assert result.status == "worker_start_error"
+    assert result.error.type == "GuiExecutableUnexpected"
+    assert launched is False
+
+
+def test_worker_discovery_rejects_missing_idat64_without_env_or_path_fallback(
     tmp_path, monkeypatch
 ):
     db = tmp_path / "sample.i64"
@@ -234,15 +274,11 @@ def test_worker_discovery_falls_back_to_env_when_gui_directory_has_no_worker(
     env_ida = tmp_path / "idat64-env.exe"
     env_ida.write_text("worker", encoding="utf-8")
     monkeypatch.setenv("IDA_SCRIPT_MCP_IDA_PATH", str(env_ida))
-    monkeypatch.setenv("IDA_SCRIPT_MCP_WORKER_MODE", "idat")
-    captured = {}
+    launched = False
 
-    def popen(args, **kwargs):
-        captured["args"] = args
-        job_dir = Path(kwargs["cwd"])
-        (job_dir / "result.json").write_text(
-            ExecuteResult(status="ok", result=1).model_dump_json(), encoding="utf-8"
-        )
+    def popen(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
         return FakeProcess(exit_code=0)
 
     manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
@@ -253,21 +289,22 @@ def test_worker_discovery_falls_back_to_env_when_gui_directory_has_no_worker(
         port=13338,
     )
 
-    assert captured["args"][0] == str(env_ida)
-    assert result.status == "ok"
+    assert result.status == "worker_start_error"
+    assert result.error.type == "GuiWorkerExecutableMissing"
+    assert str(env_ida) not in result.error.message
+    assert launched is False
 
 
 def test_missing_result_classified_by_exit_code(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, _worker_ida = _worker_gui_context(tmp_path, db)
     manager = IsolatedExecutionManager(
-        work_dir=tmp_path / "jobs", ida_path=ida, popen=lambda *_a, **_k: FakeProcess(exit_code=2)
+        work_dir=tmp_path / "jobs", popen=lambda *_a, **_k: FakeProcess(exit_code=2)
     )
 
     result = manager.execute(
-        ExecuteRequest(code="1"), gui_context=_gui_context(db), instance_id="sample", port=1
+        ExecuteRequest(code="1"), gui_context=gui_context, instance_id="sample", port=1
     )
 
     assert result.status == "worker_crashed"
@@ -276,8 +313,7 @@ def test_missing_result_classified_by_exit_code(tmp_path):
 def test_timeout_kills_process_tree(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, _worker_ida = _worker_gui_context(tmp_path, db)
     killed = []
     fake = FakeProcess(timeout=True)
 
@@ -287,11 +323,11 @@ def test_timeout_kills_process_tree(tmp_path):
         return True
 
     manager = IsolatedExecutionManager(
-        work_dir=tmp_path / "jobs", ida_path=ida, popen=lambda *_a, **_k: fake, kill_tree=kill_tree
+        work_dir=tmp_path / "jobs", popen=lambda *_a, **_k: fake, kill_tree=kill_tree
     )
     result = manager.execute(
         ExecuteRequest(code="while True:\n    pass", timeout_seconds=1),
-        gui_context=_gui_context(db),
+        gui_context=gui_context,
         instance_id="sample",
         port=1,
     )
@@ -306,8 +342,7 @@ def test_job_directory_is_deleted_by_default(tmp_path, monkeypatch):
     monkeypatch.delenv("IDA_SCRIPT_MCP_KEEP_JOBS", raising=False)
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, _worker_ida = _worker_gui_context(tmp_path, db)
     captured = {}
 
     def popen(_args, **kwargs):
@@ -318,11 +353,11 @@ def test_job_directory_is_deleted_by_default(tmp_path, monkeypatch):
         )
         return FakeProcess(exit_code=0)
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
 
     result = manager.execute(
         ExecuteRequest(code="result = 1"),
-        gui_context=_gui_context(db),
+        gui_context=gui_context,
         instance_id="sample",
         port=1,
     )
@@ -337,8 +372,7 @@ def test_keep_jobs_env_preserves_job_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("IDA_SCRIPT_MCP_KEEP_JOBS", "1")
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, _worker_ida = _worker_gui_context(tmp_path, db)
     captured = {}
 
     def popen(_args, **kwargs):
@@ -349,11 +383,11 @@ def test_keep_jobs_env_preserves_job_directory(tmp_path, monkeypatch):
         )
         return FakeProcess(exit_code=0)
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
 
     result = manager.execute(
         ExecuteRequest(code="result = 1"),
-        gui_context=_gui_context(db),
+        gui_context=gui_context,
         instance_id="sample",
         port=1,
     )
@@ -368,8 +402,7 @@ def test_invalid_keep_jobs_env_is_worker_start_error_without_launch(tmp_path, mo
     monkeypatch.setenv("IDA_SCRIPT_MCP_KEEP_JOBS", "true")
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, _worker_ida = _worker_gui_context(tmp_path, db)
     launched = False
 
     def popen(*_args, **_kwargs):
@@ -377,11 +410,11 @@ def test_invalid_keep_jobs_env_is_worker_start_error_without_launch(tmp_path, mo
         launched = True
         return FakeProcess(exit_code=0)
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
 
     result = manager.execute(
         ExecuteRequest(code="result = 1"),
-        gui_context=_gui_context(db),
+        gui_context=gui_context,
         instance_id="sample",
         port=1,
     )
@@ -396,8 +429,7 @@ def test_materialize_source_failure_is_structured_and_cleans_job_dir(tmp_path, m
     monkeypatch.delenv("IDA_SCRIPT_MCP_KEEP_JOBS", raising=False)
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
-    ida = tmp_path / "idat64"
-    ida.write_text("fake", encoding="utf-8")
+    gui_context, _worker_ida = _worker_gui_context(tmp_path, db)
     launched = False
 
     def popen(*_args, **_kwargs):
@@ -405,7 +437,7 @@ def test_materialize_source_failure_is_structured_and_cleans_job_dir(tmp_path, m
         launched = True
         return FakeProcess(exit_code=0)
 
-    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", ida_path=ida, popen=popen)
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
 
     def fail_materialize(_request, _job_dir):
         raise PermissionError("cannot write user code")
@@ -414,7 +446,7 @@ def test_materialize_source_failure_is_structured_and_cleans_job_dir(tmp_path, m
 
     result = manager.execute(
         ExecuteRequest(code="result = 1"),
-        gui_context=_gui_context(db),
+        gui_context=gui_context,
         instance_id="sample",
         port=1,
     )

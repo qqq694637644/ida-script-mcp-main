@@ -790,6 +790,20 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
         return _tool_error(label, hint=DEFAULT_ERROR_HINT)
 
     execute_request = params.to_execute_request()
+
+    def worker_start_error(error_type: str, message: str) -> dict[str, Any]:
+        return ExecuteResult(
+            status="worker_start_error",
+            result=None,
+            stdout="",
+            stderr="",
+            error=ExecutionError(type=error_type, message=message, traceback=None),
+            timeout_seconds=execute_request.timeout_seconds,
+            instance_id=resolved_instance_id,
+            port=port,
+            isolated=True,
+        ).model_dump(mode="json")
+
     try:
         gui_context = make_ida_request("/metadata", method="GET", port=port, timeout=10.0)
     except Exception as exc:
@@ -812,13 +826,51 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
             if candidate.get("port") == port:
                 instance_info = candidate
                 break
-    if instance_info is not None and instance_info.get("pid"):
+    if instance_info is None:
+        return worker_start_error(
+            "GuiProcessIdUnavailable",
+            (
+                "No live IDA instance registry record found for "
+                f"instance={resolved_instance_id!r}, port={port}."
+            ),
+        )
+    if not instance_info.get("pid"):
+        return worker_start_error(
+            "GuiProcessIdUnavailable",
+            (
+                "Live IDA instance registry record has no pid: "
+                f"instance={resolved_instance_id!r}, port={port}."
+            ),
+        )
+    try:
         gui_pid = int(instance_info["pid"])
-        gui_context = dict(gui_context)
-        gui_context["gui_pid"] = gui_pid
-        gui_executable_path = _get_process_executable_path(gui_pid)
-        if gui_executable_path:
-            gui_context["gui_executable_path"] = gui_executable_path
+    except Exception as exc:
+        return worker_start_error(
+            "GuiProcessIdUnavailable",
+            (
+                f"Live IDA instance pid is not an integer: {instance_info.get('pid')!r}; "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+
+    gui_executable_path = _get_process_executable_path(gui_pid)
+    if not gui_executable_path:
+        return worker_start_error(
+            "GuiExecutablePathUnavailable",
+            (
+                f"Failed to resolve executable path for current GUI IDA pid={gui_pid}; "
+                "refusing env/PATH worker discovery."
+            ),
+        )
+    if Path(gui_executable_path).name.lower() != "ida64.exe":
+        return worker_start_error(
+            "GuiExecutableUnexpected",
+            f"Expected current GUI executable to be ida64.exe, got: {gui_executable_path}",
+        )
+
+    gui_context = dict(gui_context)
+    gui_context["gui_pid"] = gui_pid
+    gui_context["gui_executable_path"] = gui_executable_path
 
     manager = IsolatedExecutionManager()
     result = manager.execute(

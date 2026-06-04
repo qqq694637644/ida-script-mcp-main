@@ -175,6 +175,48 @@ class TestExecuteIdapython:
         assert result["status"] == "worker_start_error"
         assert result["isolated"] is True
 
+    @pytest.mark.parametrize(
+        ("instance_info", "executable_path", "expected_error_type"),
+        [
+            ({"port": 13338}, None, "GuiProcessIdUnavailable"),
+            ({"port": 13338, "pid": 4242}, None, "GuiExecutablePathUnavailable"),
+            ({"port": 13338, "pid": 4242}, r"C:\IDA\ida.exe", "GuiExecutableUnexpected"),
+        ],
+    )
+    def test_public_execute_fails_fast_without_current_gui_ida64(
+        self, monkeypatch, instance_info, executable_path, expected_error_type
+    ):
+        monkeypatch.setattr(
+            "ida_script_mcp.server.resolve_target",
+            lambda _params: (13338, "sample.exe", "sample.exe"),
+        )
+        monkeypatch.setattr(
+            "ida_script_mcp.server.list_instances",
+            lambda: {"sample.exe": instance_info},
+        )
+        monkeypatch.setattr(
+            "ida_script_mcp.server._get_process_executable_path",
+            lambda _pid: executable_path,
+        )
+        def fake_make_ida_request(_endpoint, **_kwargs):
+            return {"database_path": __file__, "dirty": False, "unsaved": False}
+
+        monkeypatch.setattr("ida_script_mcp.server.make_ida_request", fake_make_ida_request)
+
+        class FailingManager:
+            def execute(self, *_args, **_kwargs):
+                raise AssertionError("IsolatedExecutionManager must not be called")
+
+        monkeypatch.setattr(
+            "ida_script_mcp.server.IsolatedExecutionManager", lambda: FailingManager()
+        )
+
+        result = asyncio.run(execute_idapython(ExecuteScriptInput(code="result = 1")))
+
+        assert result["status"] == "worker_start_error"
+        assert result["error"]["type"] == expected_error_type
+        assert result["isolated"] is True
+
     def test_execute_input_rejects_public_apply_changes_field(self):
         with pytest.raises(ValidationError):
             ExecuteScriptInput.model_validate({"code": "1", "apply_changes": True})
