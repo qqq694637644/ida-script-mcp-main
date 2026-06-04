@@ -1,3 +1,4 @@
+# ruff: noqa: E501, I001, B904, F841
 from __future__ import annotations
 
 import base64
@@ -613,6 +614,151 @@ def _run_worker_chain(
         metadata_after_apply = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
         result["responses"]["metadata_after_apply"] = metadata_after_apply["body"]
         _check(result, "metadata dirty after destructive apply", metadata_after_apply["body"].get("dirty") is True, metadata_after_apply["body"])
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _run_gui_worker_discovery(
+    ready: dict,
+    base_url: str,
+    ida_dir: Path,
+    user_script: Path,
+    result: dict,
+) -> None:
+    health = _health_with_retry(base_url)
+    result["responses"]["health"] = health["body"]
+    _check(result, "health reports plugin name", health["body"].get("plugin") == "IDA-Script-MCP", health["body"])
+
+    metadata = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+    result["responses"]["metadata_before"] = metadata["body"]
+    _check(result, "metadata clean before GUI worker discovery", metadata["body"].get("dirty_state_known") is True and metadata["body"].get("dirty") is False, metadata["body"])
+    database_sha256 = metadata["body"].get("database_sha256")
+    _check(result, "metadata includes database_sha256", bool(database_sha256), metadata["body"])
+
+    functions_page = _json_request(
+        "POST",
+        base_url,
+        "/functions",
+        {"offset": 0, "limit": 20, "include_thunks": True, "include_library_functions": True},
+        expected_status=200,
+        timeout=10,
+    )
+    result["responses"]["functions_page"] = functions_page["body"]
+    functions = functions_page["body"].get("functions") or []
+    _check(result, "functions endpoint returns at least one function", len(functions) > 0, functions_page["body"])
+
+    target_ea = int(functions[0]["start_ea"])
+    target_hex = hex(target_ea)
+    run_id = str(int(time.time()))
+    new_name = f"mcp_gui_worker_discovery_{run_id}"
+    comment_text = f"mcp GUI worker discovery comment {run_id}"
+
+    runtime_root = _install_runtime_package_files()
+    expected_gui_ida = ida_dir / "ida64.exe"
+    expected_worker_ida = ida_dir / "idat64.exe"
+    _check(result, "expected GUI ida64 exists", expected_gui_ida.is_file(), {"path": str(expected_gui_ida)})
+    _check(result, "expected worker idat64 exists", expected_worker_ida.is_file(), {"path": str(expected_worker_ida)})
+
+    worker_jobs = WORK_DIR / "gui_worker_discovery_jobs"
+    env_keys = [
+        "IDA_SCRIPT_MCP_IDA_PATH",
+        "IDA_SCRIPT_MCP_WORKER_MODE",
+        "IDA_SCRIPT_MCP_WORK_DIR",
+        "IDA_SCRIPT_MCP_KEEP_JOBS",
+        "IDA_SCRIPT_MCP_WORKER_CHAIN_TARGET_EA",
+        "IDA_SCRIPT_MCP_WORKER_CHAIN_NEW_NAME",
+        "IDA_SCRIPT_MCP_WORKER_CHAIN_COMMENT",
+    ]
+    previous_env = {key: os.environ.get(key) for key in env_keys}
+    os.environ.pop("IDA_SCRIPT_MCP_IDA_PATH", None)
+    os.environ.pop("IDA_SCRIPT_MCP_WORKER_MODE", None)
+    os.environ["IDA_SCRIPT_MCP_WORK_DIR"] = str(worker_jobs)
+    os.environ["IDA_SCRIPT_MCP_KEEP_JOBS"] = "1"
+    os.environ["IDA_SCRIPT_MCP_WORKER_CHAIN_TARGET_EA"] = target_hex
+    os.environ["IDA_SCRIPT_MCP_WORKER_CHAIN_NEW_NAME"] = new_name
+    os.environ["IDA_SCRIPT_MCP_WORKER_CHAIN_COMMENT"] = comment_text
+    result["gui_worker_discovery_env"] = {
+        "IDA_SCRIPT_MCP_IDA_PATH": os.environ.get("IDA_SCRIPT_MCP_IDA_PATH"),
+        "IDA_SCRIPT_MCP_WORKER_MODE": os.environ.get("IDA_SCRIPT_MCP_WORKER_MODE"),
+        "IDA_SCRIPT_MCP_WORK_DIR": os.environ.get("IDA_SCRIPT_MCP_WORK_DIR"),
+        "IDA_SCRIPT_MCP_KEEP_JOBS": os.environ.get("IDA_SCRIPT_MCP_KEEP_JOBS"),
+    }
+    _stage(
+        "gui_worker_discovery_runtime_prepare_done",
+        {
+            "runtime_root": str(runtime_root),
+            "expected_gui_ida": str(expected_gui_ida),
+            "expected_worker_ida": str(expected_worker_ida),
+            "user_script": str(user_script),
+        },
+    )
+
+    try:
+        import asyncio
+        from ida_script_mcp import server as mcp_server
+
+        class ExecuteParams:
+            instance_id = None
+            port = int(ready["port"])
+            code = None
+            script_path = str(user_script)
+            capture_output = True
+            timeout_seconds = 90
+            collect_changes = True
+
+            def to_execute_request(self):
+                return mcp_server.ExecuteRequest.model_validate(
+                    {
+                        "code": self.code,
+                        "script_path": self.script_path,
+                        "capture_output": self.capture_output,
+                        "timeout_seconds": self.timeout_seconds,
+                    }
+                )
+
+        _stage("gui_worker_discovery_execute_start", {"port": int(ready["port"])})
+        execute_result = asyncio.run(mcp_server.execute_idapython(ExecuteParams()))
+        result["responses"]["execute_idapython_gui_worker_discovery"] = execute_result
+        _check(result, "GUI worker discovery execute status ok", execute_result.get("status") == "ok", execute_result)
+        _check(result, "GUI worker discovery execute isolated true", execute_result.get("isolated") is True, execute_result)
+        _check(result, "GUI worker discovery job_id present", bool(execute_result.get("job_id")), execute_result)
+        _check(result, "GUI worker discovery artifacts retained", execute_result.get("artifacts_retained") is True, execute_result)
+
+        artifacts = execute_result.get("artifacts") or {}
+        metadata_path = artifacts.get("metadata")
+        worker_runtime_path = artifacts.get("worker_runtime")
+        _check(result, "GUI worker discovery metadata artifact path present", bool(metadata_path), artifacts)
+        _check(result, "GUI worker discovery worker_runtime artifact path present", bool(worker_runtime_path), artifacts)
+        job_metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+        worker_runtime = json.loads(Path(worker_runtime_path).read_text(encoding="utf-8"))
+        gui_context = job_metadata.get("gui_context") or {}
+        gui_executable_path = str(gui_context.get("gui_executable_path") or "")
+        result["gui_worker_discovery_summary"] = {
+            "expected_gui_ida": str(expected_gui_ida),
+            "expected_worker_ida": str(expected_worker_ida),
+            "metadata_gui_pid": gui_context.get("gui_pid"),
+            "metadata_gui_executable_path": gui_executable_path,
+            "worker_runtime": worker_runtime,
+            "job_metadata_path": metadata_path,
+            "worker_runtime_path": worker_runtime_path,
+        }
+        _check(result, "GUI worker discovery metadata has gui_pid", bool(gui_context.get("gui_pid")), gui_context)
+        _check(result, "GUI worker discovery metadata has ida64 path", Path(gui_executable_path).name.lower() == "ida64.exe", gui_context)
+        _check(result, "GUI worker discovery metadata points to expected ida64", os.path.normcase(gui_executable_path) == os.path.normcase(str(expected_gui_ida)), gui_context)
+        _check(result, "GUI worker discovery env path was absent", result["gui_worker_discovery_env"]["IDA_SCRIPT_MCP_IDA_PATH"] is None, result["gui_worker_discovery_env"])
+        _check(result, "GUI worker discovery worker mode was absent", result["gui_worker_discovery_env"]["IDA_SCRIPT_MCP_WORKER_MODE"] is None, result["gui_worker_discovery_env"])
+        _check(result, "GUI worker discovery worker opened copied database", bool(worker_runtime.get("opened_database_path")), worker_runtime)
+
+        changes = execute_result.get("changes") or []
+        _check(result, "GUI worker discovery produced changes", len(changes) >= 2, execute_result)
+        _stage(
+            "gui_worker_discovery_execute_done",
+            {"status": execute_result.get("status"), "job_id": execute_result.get("job_id"), "change_count": len(changes)},
+        )
     finally:
         for key, value in previous_env.items():
             if value is None:
@@ -1355,6 +1501,8 @@ def main() -> int:
             _run_worker_failure_matrix(ready, str(ready["base_url"]), ida_dir, user_scripts, result)
         elif TEST_MODE == "u012_set_type_complex":
             _run_u012_set_type_complex(ready, str(ready["base_url"]), ida_dir, user_script, result)
+        elif TEST_MODE == "gui_worker_discovery":
+            _run_gui_worker_discovery(ready, str(ready["base_url"]), ida_dir, user_script, result)
         elif TEST_MODE == "worker_chain":
             _run_worker_chain(ready, str(ready["base_url"]), ida_dir, user_script, result)
         else:

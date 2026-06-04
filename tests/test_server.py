@@ -136,6 +136,14 @@ class TestExecuteIdapython:
             "ida_script_mcp.server.resolve_target",
             lambda _params: (13338, "sample.exe", "sample.exe"),
         )
+        monkeypatch.setattr(
+            "ida_script_mcp.server.list_instances",
+            lambda: {"sample.exe": {"port": 13338, "pid": 4242}},
+        )
+        monkeypatch.setattr(
+            "ida_script_mcp.server._get_process_executable_path",
+            lambda pid: r"C:\IDA\ida64.exe" if pid == 4242 else None,
+        )
 
         def fake_make_ida_request(endpoint, **kwargs):
             calls.append((endpoint, kwargs))
@@ -149,6 +157,8 @@ class TestExecuteIdapython:
 
                 assert request.code == "result = 1"
                 assert gui_context["database_path"] == __file__
+                assert gui_context["gui_pid"] == 4242
+                assert gui_context["gui_executable_path"] == r"C:\IDA\ida64.exe"
                 assert instance_id == "sample.exe"
                 assert port == 13338
                 assert collect_changes is True
@@ -163,6 +173,48 @@ class TestExecuteIdapython:
 
         assert calls and calls[0][0] == "/metadata"
         assert result["status"] == "worker_start_error"
+        assert result["isolated"] is True
+
+    @pytest.mark.parametrize(
+        ("instance_info", "executable_path", "expected_error_type"),
+        [
+            ({"port": 13338}, None, "GuiProcessIdUnavailable"),
+            ({"port": 13338, "pid": 4242}, None, "GuiExecutablePathUnavailable"),
+            ({"port": 13338, "pid": 4242}, r"C:\IDA\ida.exe", "GuiExecutableUnexpected"),
+        ],
+    )
+    def test_public_execute_fails_fast_without_current_gui_ida64(
+        self, monkeypatch, instance_info, executable_path, expected_error_type
+    ):
+        monkeypatch.setattr(
+            "ida_script_mcp.server.resolve_target",
+            lambda _params: (13338, "sample.exe", "sample.exe"),
+        )
+        monkeypatch.setattr(
+            "ida_script_mcp.server.list_instances",
+            lambda: {"sample.exe": instance_info},
+        )
+        monkeypatch.setattr(
+            "ida_script_mcp.server._get_process_executable_path",
+            lambda _pid: executable_path,
+        )
+        def fake_make_ida_request(_endpoint, **_kwargs):
+            return {"database_path": __file__, "dirty": False, "unsaved": False}
+
+        monkeypatch.setattr("ida_script_mcp.server.make_ida_request", fake_make_ida_request)
+
+        class FailingManager:
+            def execute(self, *_args, **_kwargs):
+                raise AssertionError("IsolatedExecutionManager must not be called")
+
+        monkeypatch.setattr(
+            "ida_script_mcp.server.IsolatedExecutionManager", lambda: FailingManager()
+        )
+
+        result = asyncio.run(execute_idapython(ExecuteScriptInput(code="result = 1")))
+
+        assert result["status"] == "worker_start_error"
+        assert result["error"]["type"] == expected_error_type
         assert result["isolated"] is True
 
     def test_execute_input_rejects_public_apply_changes_field(self):

@@ -107,6 +107,7 @@ def build_guest_ida_worker_chain_test_script(
         "worker_timeout": "worker_timeout_user_script.py",
         "worker_failure_matrix": "worker_crash_user_script.py",
         "u012_set_type_complex": "u012_set_type_complex_worker_script.py",
+        "gui_worker_discovery": "worker_chain_user_script.py",
     }
     try:
         user_script_name = user_script_name_by_mode[test_mode]
@@ -130,9 +131,13 @@ def build_guest_ida_worker_chain_test_script(
         '"__IDA_EXECUTABLE_CANDIDATES_JSON__"': json.dumps(list(IDA_EXECUTABLE_CANDIDATES)),
         '"__LEGACY_ROOT_SUPPORT_FILES_JSON__"': json.dumps(list(LEGACY_ROOT_SUPPORT_FILES)),
         '"__PLUGIN_FILES_B64_JSON__"': json.dumps(_b64_map(install_files), ensure_ascii=False),
-        '"__PLUGIN_EXPECTED_SHA256_JSON__"': json.dumps(_sha256_map(install_files), ensure_ascii=False),
+        '"__PLUGIN_EXPECTED_SHA256_JSON__"': json.dumps(
+            _sha256_map(install_files), ensure_ascii=False
+        ),
         '"__RUNTIME_FILES_B64_JSON__"': json.dumps(_b64_map(runtime_files), ensure_ascii=False),
-        '"__RUNTIME_EXPECTED_SHA256_JSON__"': json.dumps(_sha256_map(runtime_files), ensure_ascii=False),
+        '"__RUNTIME_EXPECTED_SHA256_JSON__"': json.dumps(
+            _sha256_map(runtime_files), ensure_ascii=False
+        ),
         '"__USER_SCRIPT_B64_JSON__"': json.dumps(_b64_map(user_scripts), ensure_ascii=False),
         '"__USER_SCRIPT_SHA256_JSON__"': json.dumps(_sha256_map(user_scripts), ensure_ascii=False),
     }
@@ -171,6 +176,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "worker_timeout",
             "worker_failure_matrix",
             "u012_set_type_complex",
+            "gui_worker_discovery",
         ],
     )
     parser.add_argument("--output", required=True)

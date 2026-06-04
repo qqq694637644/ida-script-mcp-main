@@ -53,26 +53,37 @@ def _keep_jobs_enabled() -> bool:
     raise ValueError("IDA_SCRIPT_MCP_KEEP_JOBS must be exactly 0 or 1")
 
 
-def _discover_ida_path() -> Path | None:
-    explicit = os.environ.get("IDA_SCRIPT_MCP_IDA_PATH")
-    if explicit:
-        path = Path(explicit)
-        return path if path.exists() else None
-    mode = os.environ.get("IDA_SCRIPT_MCP_WORKER_MODE", "auto").lower()
-    if mode not in {"auto", "ida", "idat"}:
-        return None
-    names = (
-        ["idat64", "idat", "ida64", "ida"]
-        if mode == "auto"
-        else (["ida64", "ida"] if mode == "ida" else ["idat64", "idat"])
-    )
-    if sys.platform == "win32":
-        names = [f"{name}.exe" for name in names]
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return Path(found)
-    return None
+class GuiExecutablePathUnavailable(RuntimeError):  # noqa: N818
+    """Raised when the live GUI IDA executable path is missing."""
+
+
+class GuiExecutableUnexpected(RuntimeError):  # noqa: N818
+    """Raised when the live GUI executable is not the expected ida64.exe."""
+
+
+class GuiWorkerExecutableMissing(RuntimeError):  # noqa: N818
+    """Raised when idat64.exe is not next to the live GUI ida64.exe."""
+
+
+def _discover_ida_path(gui_context: dict[str, Any] | None = None) -> Path:
+    gui_executable_path = None if gui_context is None else gui_context.get("gui_executable_path")
+    if not gui_executable_path:
+        raise GuiExecutablePathUnavailable(
+            "Missing gui_executable_path in GUI context; refusing env/PATH worker discovery."
+        )
+
+    gui_path = Path(str(gui_executable_path))
+    if gui_path.name.lower() != "ida64.exe":
+        raise GuiExecutableUnexpected(
+            f"Expected current GUI executable to be ida64.exe, got: {gui_path}"
+        )
+
+    worker_path = gui_path.with_name("idat64.exe")
+    if not worker_path.exists():
+        raise GuiWorkerExecutableMissing(
+            f"Expected headless worker next to GUI IDA: {worker_path}; GUI executable: {gui_path}"
+        )
+    return worker_path
 
 
 class IsolatedExecutionManager:
@@ -82,13 +93,11 @@ class IsolatedExecutionManager:
         self,
         *,
         work_dir: Path | None = None,
-        ida_path: Path | None = None,
         hard_timeout_margin_seconds: int = HARD_TIMEOUT_MARGIN_SECONDS,
         popen=subprocess.Popen,
         kill_tree=kill_process_tree,
     ):
         self.work_dir = work_dir or _default_work_dir()
-        self.ida_path = ida_path
         self.hard_timeout_margin_seconds = hard_timeout_margin_seconds
         self._popen = popen
         self._kill_tree = kill_tree
@@ -192,17 +201,15 @@ class IsolatedExecutionManager:
                 job_id=job_id,
             )
 
-        ida_path = self.ida_path or _discover_ida_path()
-        if ida_path is None or not ida_path.exists():
+        try:
+            ida_path = _discover_ida_path(gui_context)
+        except Exception as exc:
             return self._failure(
                 "worker_start_error",
                 request,
                 started,
-                "IdaExecutableNotConfigured",
-                (
-                    "Set IDA_SCRIPT_MCP_IDA_PATH to idat/idat64/ida64; "
-                    "no GUI /execute fallback is allowed."
-                ),
+                type(exc).__name__,
+                str(exc),
                 instance_id=instance_id,
                 port=port,
                 job_id=job_id,
