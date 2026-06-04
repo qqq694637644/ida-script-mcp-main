@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。现在建议从 apply_changes/read-only endpoint corner cases 或 installer/client config coverage 开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。U013 已由 workflow run `26926417574` 通过并移入 `TESTED.md`。现在建议从 U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage 开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -382,6 +382,27 @@ list_functions 返回被选中的 instance_id
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U005，除非修改了 instance registry 或 selector 解析逻辑。
 
+
+### U013：patch_bytes complex cases（已通过）
+
+Run `26926417574` 已验证：
+
+```text
+old_bytes mismatch 失败且不 dirty
+unmapped-only patch 失败且不 dirty
+multi-byte patch
+instruction 中间/第二字节 patch
+new_bytes == old_bytes 的 same-byte patch
+同一地址连续 patch 两次
+patch 到 data/import 地址
+partial apply: 前 6 个 patch 生效，最后 unmapped op 失败
+patch 后 inspect_address bytes/disassembly 刷新
+partial destructive apply 后 dirty=true
+dirty 后第二次 destructive apply 被拒绝
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U013，除非修改了 `patch_bytes` replay、`old_bytes_hex` 校验或 partial apply 语义。
+
 ## 8. 失败排查顺序
 
 不要一看到失败就改 payload 或插件。按边界排查：
@@ -406,6 +427,6 @@ list_functions 返回被选中的 instance_id
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，优先选择 apply_changes/read-only endpoint corner cases 或 installer/client config coverage。
+4. 如果要推进下一项覆盖，优先选择 U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。
