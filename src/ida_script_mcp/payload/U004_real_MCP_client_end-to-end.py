@@ -610,10 +610,10 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
                 {
                     "params": {
                         "port": int(ready["port"]),
-                        "code": "result = {'u004': 'real_mcp_client', 'transport': 'stdio'}",
+                        "script_path": str(WORK_DIR / "U004_missing_source_for_real_MCP_client.py"),
                         "capture_output": True,
                         "timeout_seconds": 30,
-                        "collect_changes": False,
+                        "collect_changes": True,
                     }
                 },
             )
@@ -621,13 +621,12 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             execute = _tool_payload(execute_call)
             observed["tool_results"]["execute_idapython"] = execute
             _assert_tool_payload(result, "execute_idapython", execute)
-            _check(result, "stdio execute_idapython status ok", execute.get("status") == "ok", execute)
+            _check(result, "stdio execute_idapython returns source_error", execute.get("status") == "source_error", execute)
             _check(result, "stdio execute_idapython isolated true", execute.get("isolated") is True, execute)
-            _check(result, "stdio execute_idapython returned query result", (execute.get("result") or {}).get("u004") == "real_mcp_client", execute)
-            _check(result, "stdio execute_idapython collect_changes false has no changes", execute.get("changes") == [], execute)
+            _check(result, "stdio execute_idapython error type is FileNotFoundError", (execute.get("error") or {}).get("type") == "FileNotFoundError", execute)
             change_set = {
                 "schema_version": 1,
-                "job_id": "u004-empty-dry-run",
+                "job_id": "u004-dry-run-comment",
                 "database_fingerprint": {
                     "input_file_path": db_info.get("input_file_path"),
                     "database_path": db_info.get("database_path"),
@@ -640,7 +639,17 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
                     "database_sha256": db_info.get("database_sha256"),
                     "database_size": db_info.get("database_size"),
                 },
-                "operations": [],
+                "operations": [
+                    {
+                        "op_id": "op-u004-comment",
+                        "op": "comment",
+                        "ea": target_ea,
+                        "source": "explicit_api",
+                        "confidence": "high",
+                        "text": "u004 real MCP client dry-run comment",
+                        "repeatable": False,
+                    }
+                ],
             }
             observed["change_set_summary"] = {
                 "job_id": change_set.get("job_id"),
@@ -658,7 +667,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             _assert_tool_payload(result, "apply_worker_changes", apply_dry)
             _check(result, "stdio apply_worker_changes dry-run status ok", apply_dry.get("status") == "ok", apply_dry)
             _check(result, "stdio apply_worker_changes dry-run applies nothing", apply_dry.get("applied") == [], apply_dry)
-            _check(result, "stdio apply_worker_changes skips operations", len(apply_dry.get("skipped") or []) == len(change_set.get("operations") or []), apply_dry)
+            _check(result, "stdio apply_worker_changes skips dry-run operation", len(apply_dry.get("skipped") or []) == 1, apply_dry)
             _check(result, "stdio apply_worker_changes dry-run errors empty", apply_dry.get("errors") == [], apply_dry)
 
     _stage("mcp_stdio_client_done", {"tools": observed.get("tool_names")})
