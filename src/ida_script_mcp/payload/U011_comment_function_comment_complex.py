@@ -200,7 +200,7 @@ def _stage(name: str, detail: object | None = None) -> None:
     with HEARTBEAT_PATH.open("a", encoding="utf-8") as output:
         output.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         output.write("\n")
-    print("U011_STAGE=" + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+    print("U011_STAGE=" + json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -681,7 +681,11 @@ def main() -> int:
             result["ida_returncode"] = process.returncode
         result.update({"ida_log_tail": _tail(IDA_LOG_PATH), "heartbeat_tail": _tail(HEARTBEAT_PATH), "stdout_tail": stdout[-4000:], "stderr_tail": stderr[-4000:]})
         _write_json(RESULT_PATH, result)
-        print("U011_COMMENT_FUNCTION_COMMENT_TEST_RESULT=" + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+        print(
+            "U011_COMMENT_FUNCTION_COMMENT_TEST_RESULT="
+            + json.dumps(result, ensure_ascii=True, sort_keys=True),
+            flush=True,
+        )
     return 0 if result.get("status") == "passed" else 1
 
 
@@ -691,7 +695,15 @@ if __name__ == "__main__":
     except Exception as exc:
         print(
             "U011_COMMENT_FUNCTION_COMMENT_TEST_ERROR="
-            + json.dumps({"type": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()}, ensure_ascii=False, sort_keys=True),
+            + json.dumps(
+                {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
             file=sys.stderr,
         )
         raise SystemExit(1)

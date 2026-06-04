@@ -227,6 +227,7 @@ def test_build_guest_u011_comment_function_comment_script_contains_checked_sourc
     assert "thunk_or_library_comment" in script
     assert "unicode_comment" in script
     assert "long_comment" in script
+    assert "ensure_ascii=True" in script
     assert "__PLUGIN_FILES_B64_JSON__" not in script
     assert "__PLUGIN_EXPECTED_SHA256_JSON__" not in script
     compile(script, "<generated_u011_comment_function_comment_payload>", "exec")
