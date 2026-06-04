@@ -1,0 +1,34 @@
+name: Host runner smoke
+
+on:
+  push:
+    branches:
+      - gpt/execute-subsystem-20260602-1dc47a
+    paths:
+      - ".github/workflows/host-runner-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: HostMachine smoke
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify GitHub can dispatch to HostMachine
+        shell: cmd
+        run: |
+          echo RUNNER_NAME=%RUNNER_NAME%
+          echo RUNNER_OS=%RUNNER_OS%
+          echo RUNNER_ARCH=%RUNNER_ARCH%
+          echo RUNNER_TEMP=%RUNNER_TEMP%
+          echo GITHUB_WORKSPACE=%GITHUB_WORKSPACE%
+          echo USERNAME=%USERNAME%
+          echo COMPUTERNAME=%COMPUTERNAME%
+          whoami
+          hostname
+          if not "%RUNNER_NAME%"=="HostMachine" exit /b 1
+          echo Host runner dispatch smoke passed.
