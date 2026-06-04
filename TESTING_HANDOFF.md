@@ -226,6 +226,32 @@ U001 已由 run `26922985347` 验证并移入 `TESTED.md`。U002 已由 run `269
 
 `UNTESTED.md` 是待办队列，`TESTED.md` 是证据账本。
 
+### 测试脚本命名规范
+
+所有新增的测试用脚本必须使用 `U00x_测试功能.py` 命名，保证文件名能直接对应 `UNTESTED.md` / `TESTED.md` 里的测试编号和测试目标。不要再使用只有技术实现含义、但看不出对应测试编号的临时脚本名。
+
+示例：
+
+```text
+U004_real_MCP_client_end-to-end.py
+```
+
+命名规则：
+
+```text
+U00x_<short_test_function>.py
+```
+
+如果同一个 U 项需要多个辅助脚本，也必须保留同一个编号前缀，例如：
+
+```text
+U004_real_MCP_client_bootstrap.py
+U004_real_MCP_client_worker_script.py
+U004_real_MCP_client_assertions.py
+```
+
+核心测试逻辑必须是仓库里的真实 `.py` 文件，允许 workflow/builder 把文件内容打包传给 guest，但不要把主要测试逻辑直接拼成不可 review 的大字符串。
+
 迁移规则：
 
 ```text
@@ -342,6 +368,6 @@ rejected: GUI dirty 后 execute_idapython 被拒绝且未启动 worker
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，直接做 U004 real MCP client end-to-end payload。
+4. 如果要推进下一项覆盖，直接做 `U004_real_MCP_client_end-to-end.py` payload。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。
