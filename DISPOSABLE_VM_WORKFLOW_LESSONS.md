@@ -60,6 +60,7 @@ restore_extra_args_json=[]
 | U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
 | U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
+| U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
 
 ### Final full-smoke coverage
 
@@ -199,6 +200,32 @@ artifact=disposable-vm-guest-agent-smoke / 7401236989
 ```
 
 This verifies real MCP client transport and tool-result plumbing. Successful worker-generated replay remains covered by U001; U004 intentionally treats `execute_idapython` as a real-client structured-result check.
+
+Run `26925755930` closed U005, the multi-IDA instance selector test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u005_multi_ida_instance_selection
+payload status=passed
+same-directory copy=test1_u005_copy.dll
+primary instance=7388_test1.dll port=13338 database=test1.dll
+copy instance=2328_test1_u005_copy.dll port=13339 database=test1_u005_copy.dll
+list_ida_instances.count=2
+no selector rejected multiple instances
+full instance_id selectors chose primary/copy correctly
+unique substring selectors chose primary/copy correctly
+port selector chose copy
+port precedence over conflicting instance_id chose copy
+ambiguous selector `test1` rejected as matched multiple instance ids
+missing selector rejected as not found
+list_functions returned selected instance_id for both primary and copy
+artifact=disposable-vm-guest-agent-smoke / 7401401506
+```
+
+This verifies the selector rules that protect multi-database sessions from accidentally reading or writing the wrong IDA instance.
 
 ## Failure lessons and fixes
 
@@ -485,6 +512,7 @@ dedicated action/mode, not default full smoke
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
 
 ## Current conclusion
 
@@ -496,12 +524,12 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, and U004 real MCP client transport/tool-result flow are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, and U005 multi-IDA instance selection are now verified separately.
 
-The remaining backlog starts after U004. Next likely areas are:
+The remaining backlog starts after U005. Next likely areas are:
 
 ```text
-U005 multi-IDA instance selection
 apply_changes/read-only endpoint corner cases
 installer/client config coverage
+negative replay/fingerprint edge cases
 ```
