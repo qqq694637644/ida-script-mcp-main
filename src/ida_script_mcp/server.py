@@ -30,10 +30,10 @@ try:
 except Exception:  # pragma: no cover - exercised by guest payloads without pydantic.
     StrictBool = bool  # type: ignore[assignment]
 
-    def ConfigDict(**kwargs: Any) -> dict[str, Any]:  # type: ignore[no-redef]
+    def ConfigDict(**kwargs: Any) -> dict[str, Any]:  # noqa: N802  # type: ignore[no-redef]
         return dict(kwargs)
 
-    def Field(default: Any = None, **_kwargs: Any) -> Any:  # type: ignore[no-redef]
+    def Field(default: Any = None, **_kwargs: Any) -> Any:  # noqa: N802  # type: ignore[no-redef]
         return default
 
     def model_validator(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
@@ -233,13 +233,13 @@ class GetXrefsInput(InstanceTargetInput):
         default="to",
         description="Whether to return xrefs to the target or from the target.",
     )
-    xref_kind: Literal["all", "code", "data"] = Field(
+    xref_kind: Literal["all", "code", "data", "flow"] = Field(
         default="all",
         description="Filter xrefs by kind.",
     )
     limit: int = Field(
         default=200,
-        ge=1,
+        ge=0,
         le=5000,
         description="Maximum number of cross references to return.",
     )
@@ -711,6 +711,8 @@ async def get_xrefs(params: GetXrefsInput) -> dict[str, Any]:
           and data refs to a symbol.
         - ``get_xrefs({"address": "0x401000", "direction": "from", "xref_kind": "code"})``
           returns outgoing code refs.
+        - ``get_xrefs({"address": "0x401000", "direction": "from", "xref_kind": "flow"})``
+          returns ordinary-flow refs only.
     """
     if not params.address and not params.name:
         return _tool_error("Provide either 'address' or 'name'.")

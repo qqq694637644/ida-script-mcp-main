@@ -11,14 +11,17 @@ from ida_script_mcp.payload.ida_api_test import (
     DEFAULT_IDA_TIMEOUT_SECONDS,
     build_guest_ida_api_test_script,
 )
-from ida_script_mcp.payload.ida_worker_chain_test import (
-    build_guest_ida_worker_chain_test_script,
-)
 from ida_script_mcp.payload.ida_u004_real_mcp_client_test import (
     build_guest_u004_real_mcp_client_test_script,
 )
 from ida_script_mcp.payload.ida_u005_multi_ida_instance_test import (
     build_guest_u005_multi_ida_instance_test_script,
+)
+from ida_script_mcp.payload.ida_u008_xrefs_corner_case_test import (
+    build_guest_u008_xrefs_corner_case_test_script,
+)
+from ida_script_mcp.payload.ida_worker_chain_test import (
+    build_guest_ida_worker_chain_test_script,
 )
 
 
@@ -179,7 +182,11 @@ def test_build_guest_u004_real_mcp_client_script_contains_checked_sources() -> N
     assert "get_xrefs" in script
     assert "execute_idapython" in script
     assert "apply_worker_changes" in script
-    assert '["py", "-3.11", "-m", "pip", "install", "-r", "requirements.txt", "--proxy", PIP_PROXY]' in script
+    expected_pip_command = (
+        '["py", "-3.11", "-m", "pip", "install", "-r", '
+        '"requirements.txt", "--proxy", PIP_PROXY]'
+    )
+    assert expected_pip_command in script
     assert "http://192.168.1.249:10810" in script
     assert "__WORKER_SCRIPT_B64_JSON__" not in script
     assert "__RUNTIME_FILES_B64_JSON__" not in script
@@ -206,6 +213,24 @@ def test_build_guest_u005_multi_ida_instance_script_contains_checked_sources() -
     assert "__RUNTIME_FILES_B64_JSON__" not in script
     assert "__PLUGIN_FILES_B64_JSON__" not in script
     compile(script, "<generated_u005_multi_ida_instance_payload>", "exec")
+
+
+def test_build_guest_u008_xrefs_corner_case_script_contains_checked_sources() -> None:
+    script = build_guest_u008_xrefs_corner_case_test_script()
+
+    assert "U008_XREFS_CORNER_CASES_RESULT=" in script
+    assert "U008_XREFS_STAGE=" in script
+    assert '"/xrefs"' in script
+    assert '"flow"' in script
+    assert "xrefs_limit_zero_start" in script
+    assert "xrefs_limit_negative_start" in script
+    assert "xrefs_limit_non_integer_start" in script
+    assert "xrefs_string_data_address_start" in script
+    assert "xrefs_import_thunk_start" in script
+    assert "xrefs_cycle_or_backedge_start" in script
+    assert "U008 xrefs leaves GUI database clean" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    compile(script, "<generated_u008_xrefs_corner_case_payload>", "exec")
 
 
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
@@ -266,6 +291,18 @@ def test_disposable_vm_workflow_exposes_u005_multi_ida_instance_action() -> None
     assert "ida_plugin_u005_multi_ida_instance_test" in workflow
     assert "U005_multi_IDA_instance_selection.py" in workflow
     assert "ida_script_mcp.payload.ida_u005_multi_ida_instance_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u008_xrefs_corner_case_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u008_xrefs_corner_case_test" in workflow
+    assert "U008_xrefs_corner_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u008_xrefs_corner_case_test" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:

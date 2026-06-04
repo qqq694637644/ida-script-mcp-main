@@ -97,6 +97,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13338
 MAX_PORT_RANGE = 100
 MAX_DISASSEMBLY_LINES = 1000
+MAX_XREFS_LIMIT = 5000
 UNSAFE_GUI_EXECUTE_ENV = "IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE"
 
 INSTANCE_INFO_FILE = Path.home() / ".ida_script_mcp_instances.json"
@@ -973,12 +974,36 @@ def _xref_type_name(xref_type: int) -> str | None:
     return mapping.get(xref_type)
 
 
+def _xref_is_flow(xref_type: int) -> bool:
+    try:
+        import ida_xref
+    except Exception:
+        return _xref_type_name(xref_type) == "ordinary_flow"
+    return xref_type == getattr(ida_xref, "fl_F", None)
+
+
+def _normalize_xrefs_limit(value: Any) -> tuple[int, str | None, bool]:
+    if value is None or value == "":
+        return 200, None, False
+    if isinstance(value, bool):
+        return 0, f"Could not parse limit: {value!r}", False
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0, f"Could not parse limit: {value!r}", False
+    if parsed < 0:
+        return parsed, "limit must be greater than or equal to 0.", False
+    if parsed > MAX_XREFS_LIMIT:
+        return MAX_XREFS_LIMIT, None, True
+    return parsed, None, False
+
+
 def get_xrefs_data(
     address: str | None = None,
     name: str | None = None,
     direction: str = "to",
     xref_kind: str = "all",
-    limit: int = 200,
+    limit: Any = 200,
 ) -> dict[str, Any]:
     """Get cross references to or from an address or symbol."""
     result = _collect_database_info()
@@ -1001,6 +1026,13 @@ def get_xrefs_data(
     result["direction"] = direction
     result["xref_kind"] = xref_kind
 
+    effective_limit, limit_error, limit_clamped = _normalize_xrefs_limit(limit)
+    result["limit"] = effective_limit
+    result["limit_clamped"] = limit_clamped
+    if limit_error:
+        result.update({"error": limit_error, "returned": 0, "truncated": False, "xrefs": []})
+        return result
+
     try:
         import idautils
     except Exception as exc:
@@ -1010,7 +1042,7 @@ def get_xrefs_data(
     if direction not in {"to", "from"}:
         result.update({"error": f"Unsupported direction: {direction!r}", "xrefs": []})
         return result
-    if xref_kind not in {"all", "code", "data"}:
+    if xref_kind not in {"all", "code", "data", "flow"}:
         result.update({"error": f"Unsupported xref_kind: {xref_kind!r}", "xrefs": []})
         return result
 
@@ -1022,9 +1054,13 @@ def get_xrefs_data(
     truncated = False
     for xref in iterable:
         is_code = bool(getattr(xref, "iscode", 0))
+        xref_type = int(getattr(xref, "type", 0))
+        is_flow = _xref_is_flow(xref_type)
         if xref_kind == "code" and not is_code:
             continue
         if xref_kind == "data" and is_code:
+            continue
+        if xref_kind == "flow" and not is_flow:
             continue
 
         from_ea = int(getattr(xref, "frm", 0))
@@ -1034,7 +1070,7 @@ def get_xrefs_data(
         except Exception:
             source_disasm = ""
 
-        if len(xrefs) >= limit:
+        if len(xrefs) >= effective_limit:
             truncated = True
             break
 
@@ -1044,9 +1080,10 @@ def get_xrefs_data(
                 "to_ea": to_ea,
                 "from_name": _symbol_name(from_ea),
                 "to_name": _symbol_name(to_ea),
-                "type": int(getattr(xref, "type", 0)),
-                "type_name": _xref_type_name(int(getattr(xref, "type", 0))),
+                "type": xref_type,
+                "type_name": _xref_type_name(xref_type),
                 "is_code": is_code,
+                "is_flow": is_flow,
                 "user": bool(getattr(xref, "user", False)),
                 "source_disassembly": source_disasm,
             }
@@ -1581,7 +1618,7 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                     name=request_data.get("name"),
                     direction=str(request_data.get("direction", "to")),
                     xref_kind=str(request_data.get("xref_kind", "all")),
-                    limit=int(request_data.get("limit", 200) or 200),
+                    limit=request_data.get("limit", 200),
                     write=False,
                 )
                 self._send_json_response(200, result)
