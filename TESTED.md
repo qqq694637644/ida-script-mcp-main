@@ -55,6 +55,7 @@ dirty=true / apply_changes_mutation_flag
 | IDA API full smoke after merge to `main` | workflow run `26921994480`, artifact `7400024008` | `main` baseline 成功，HostMachine runner，guest result `completed/0` |
 | apply_changes destructive smoke | workflow run `26918788898` | destructive replay 基础验证 |
 | patch_bytes destructive smoke | workflow run `26919752930` | 临时 `test1.i64` 中 patch 首字节，不改原始 DLL |
+| U001 full V2.3 worker replay chain | workflow run `26922985347`, artifact `7400373325` | `execute_idapython -> worker ChangeSet -> apply_worker_changes dry-run/destructive -> inspect` |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -123,12 +124,94 @@ unknown route -> HTTP 404
 Not covered by this run:
 
 ```text
-U001 execute_idapython -> headless worker -> worker-generated ChangeSet -> apply_worker_changes
 U002 worker hard timeout / kill process tree
 U003 worker crash/result-missing/recorder-error matrix
 ```
 
-因此 U001-U003 仍保留在 `UNTESTED.md`。
+因此 U002-U003 仍保留在 `UNTESTED.md`；U001 已由 run `26922985347` 关闭。
+
+
+## 2026-06-04 U001：完整 V2.3 worker replay 主链路
+
+Evidence:
+
+- Workflow run: `26922985347`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `2df76f58c1f96387eb6bf911926a936c8215d232`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7400373325`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_worker_chain_test
+ida_timeout_seconds=240
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=worker_chain
+payload status=passed
+IDA plugin instance=116_test1.dll
+IDA plugin port=13338
+metadata_before.dirty=false
+metadata_before.database_sha256=e816ec94aec1cc68b7146d662ccc81e45112d1cd0a23c6b0b1c162dfd79d4b10
+execute_idapython.status=ok
+execute_idapython.isolated=true
+execute_idapython.worker_exit_code=0
+execute_idapython.job_id=job-19a39fd40af84ec4848cfac1b58fd9af
+execute_idapython.changes contains 2 operations: rename, comment
+worker_chain_change_set_summary.operation_count=2
+worker_chain_change_set_summary.operation_types=[rename, comment]
+apply_worker_changes dry-run status=ok, applied=[], skipped=2
+inspect after dry-run kept original name/comment
+apply_worker_changes destructive status=ok, applied=2, errors=[]
+inspect after apply saw name=mcp_worker_chain_1780534531
+inspect after apply saw comment="mcp worker chain comment 1780534531"
+metadata_after_apply.dirty=true
+metadata_after_apply.dirty_state_method=apply_changes_mutation_flag
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+MCP server execute_idapython entrypoint
+GUI /metadata source context
+saved clean IDB/I64 fingerprint
+headless IDA worker launch
+worker user script from checked-in source file
+ChangeRecorder generated ChangeSet
+apply_worker_changes dry-run through MCP server
+GUI /apply_changes dry-run no-op
+apply_worker_changes destructive through MCP server
+GUI /apply_changes destructive replay
+/inspect_address verified GUI mutation
+metadata dirty state changed after destructive replay
+```
+
+Notes:
+
+- The guest payload code is checked in as `src/ida_script_mcp/payload/guest_worker_chain_payload.py`, and the worker script is checked in as `src/ida_script_mcp/payload/worker_chain_user_script.py`; the workflow transports generated script text, but the core test logic is reviewable and locally checked.
+- Two implementation issues were found and fixed before U001 passed: guest Python lacked `pydantic`, and IDA 8.3 exposed `idc.SetType` but not `idc.set_type` in the worker.
+- U002 and U003 remain in `UNTESTED.md`.
 
 ## 移入规则
 

@@ -56,6 +56,7 @@ restore_extra_args_json=[]
 | IDA API full smoke on merged `main` | Passed | `26921994480`, artifact `7400024008` |
 | `apply_changes` destructive smoke | Passed | `26918788898` |
 | `patch_bytes` destructive smoke | Passed | `26919752930` |
+| U001 full V2.3 worker replay chain | Passed | `26922985347`, artifact `7400373325` |
 
 ### Final full-smoke coverage
 
@@ -97,6 +98,32 @@ artifact=disposable-vm-guest-agent-smoke / 7400024008
 ```
 
 This confirms the merged `main` baseline still works for the non-destructive plugin HTTP API path. It does not close the remaining V2.3 worker-chain tests: `execute_idapython -> headless worker -> worker-generated ChangeSet -> apply_worker_changes`.
+
+Run `26922985347` closed U001, the full V2.3 worker-chain test, against the disposable guest VM:
+
+```text
+workflow conclusion=success
+runner=HostMachine
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=worker_chain
+payload status=passed
+execute_idapython.status=ok
+execute_idapython.isolated=true
+execute_idapython.worker_exit_code=0
+worker ChangeSet operation_count=2
+worker ChangeSet operation_types=[rename, comment]
+apply_worker_changes dry-run status=ok, applied=[], skipped=2
+apply_worker_changes destructive status=ok, applied=2, errors=[]
+inspect after apply saw name=mcp_worker_chain_1780534531
+inspect after apply saw comment="mcp worker chain comment 1780534531"
+metadata_after_apply.dirty=true
+metadata_after_apply.dirty_state_method=apply_changes_mutation_flag
+artifact=disposable-vm-guest-agent-smoke / 7400373325
+```
+
+This verifies the important V2.3 boundary that worker-generated changes can be reviewed/dry-run and then explicitly replayed into the GUI database.
 
 ## Failure lessons and fixes
 
@@ -371,6 +398,9 @@ dedicated action/mode, not default full smoke
 | `26908795266` | `a2ed1d3...` | Success | Full IDA API smoke passed before extra corner checks. |
 | `26909020426` | `bbe8e51...` | Success | Full IDA API smoke passed with extra non-destructive corner checks. |
 | `26921994480` | `e7b00f0...` | Success | Merged `main` full non-destructive IDA API smoke passed; artifact `7400024008`. |
+| `26922753371` | `fea522e...` | Failure | U001 first attempt failed before worker-chain execution because guest Python lacked `pydantic` for server import. |
+| `26922885587` | `98f3768...` | Failure | U001 second attempt reached headless worker; recorder failed on IDA 8.3 `idc.set_type` alias mismatch. |
+| `26922985347` | `2df76f5...` | Success | U001 full worker-chain passed; artifact `7400373325`. |
 
 ## Current conclusion
 
@@ -382,15 +412,11 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes` smoke has also been verified separately. The remaining highest-priority unverified area is the full V2.3 MCP worker chain:
+Destructive GUI `/apply_changes` smoke and the full V2.3 MCP worker-chain replay are now verified separately. The remaining highest-priority unverified areas are:
 
 ```text
-execute_idapython
--> headless IDA worker
--> worker-generated ChangeSet
--> apply_worker_changes dry-run
--> apply_worker_changes destructive replay
--> inspect_address verification
+U002 worker hard timeout / kill process tree
+U003 worker crash / result missing / recorder error matrix
 ```
 
-Keep this separate from the existing full smoke because the current full smoke calls plugin HTTP endpoints directly and does not prove worker-generated replay.
+Keep these separate from the existing full smoke and U001 worker-chain test so failure domains remain clear.

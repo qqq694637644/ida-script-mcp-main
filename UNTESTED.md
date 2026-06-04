@@ -6,32 +6,14 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-下一轮优先从下面三项开始，因为它们直接验证 V2.3 最核心的隔离执行主链路：
+下一轮优先从下面两项开始。U001 已通过并移入 `TESTED.md`：
 
-- [ ] **U001 完整 V2.3 主链路**：`execute_idapython -> worker collect changes -> apply_worker_changes dry-run -> apply_worker_changes destructive replay -> GUI /apply_changes -> inspect_address`。
 - [ ] **U002 worker 硬超时和进程树清理**：死循环或长阻塞 worker 必须返回 `timeout`，并确认 `hard_timeout=true`、`killed=true`、无残留 `idat64/ida64` 进程。
 - [ ] **U003 worker 异常状态矩阵**：真实 IDA worker 下构造 `worker_start_error`、`worker_crashed`、`worker_result_missing`、`recorder_error`、`source_error`、`rejected`。
 
-现有 `disposable-vm-guest-agent-smoke.yml` 已能跑 `ida_plugin_api_test` 和 `ida_plugin_apply_changes_test`，但还没有直接覆盖 `execute_idapython` 的 MCP server -> headless worker -> `apply_worker_changes` 全链路。实现 U001-U003 时通常需要新增 guest payload 或手动 guest 脚本，让 guest 侧使用当前仓库代码启动/调用 MCP server 层。
+现有 `disposable-vm-guest-agent-smoke.yml` 现已能通过 `ida_plugin_worker_chain_test` 覆盖 U001。后续 U002-U003 仍应使用同一 workflow 架构新增独立 payload/mode，避免互相干扰。
 
-## 最高优先级：完整 V2.3 主链路
-
-- [ ] **U001 `execute_idapython -> worker collect changes -> apply_worker_changes` 端到端**
-
-  需要证明的不只是 GUI `/apply_changes` 能写，而是 worker 采集出来的 `ChangeSet` 能从 MCP 层真实回放。
-
-  ```text
-  MCP execute_idapython
-  -> GUI /metadata
-  -> copy saved clean IDB/I64
-  -> headless IDA worker
-  -> worker 执行用户 IDAPython
-  -> worker 通过 recorder 生成 ChangeSet
-  -> MCP apply_worker_changes dry-run
-  -> MCP apply_worker_changes destructive replay
-  -> GUI /apply_changes
-  -> inspect_address 验证
-  ```
+## 最高优先级：worker 超时与异常矩阵
 
 - [ ] **U002 worker 硬超时和 kill process tree**
 

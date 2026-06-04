@@ -213,15 +213,14 @@ restore_extra_args_json=[]
 unknown route -> HTTP 404
 ```
 
-该 run **没有** 验证：
+该 baseline run **没有** 验证：
 
 ```text
-execute_idapython -> headless worker -> worker-generated ChangeSet -> apply_worker_changes
 worker hard timeout / kill process tree
 worker crash/result-missing/recorder-error matrix
 ```
 
-所以 U001-U003 仍保留在 `UNTESTED.md`。
+U001 已由 run `26922985347` 验证并移入 `TESTED.md`。U002-U003 仍保留在 `UNTESTED.md`。
 
 ## 6. 已测/未测迁移规则
 
@@ -270,55 +269,22 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-优先级最高的是 `UNTESTED.md` 中 U001-U003。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。现在优先级最高的是 `UNTESTED.md` 中 U002-U003。
 
-### U001：完整 V2.3 主链路
+### U001：完整 V2.3 主链路（已通过）
 
-目标不是再测 `/apply_changes`，而是证明 worker 产出的 `ChangeSet` 能经 MCP 层回放：
-
-```text
-MCP execute_idapython
-  -> GUI /metadata
-  -> saved clean database fingerprint
-  -> copy saved IDB/I64
-  -> launch headless IDA worker
-  -> worker 执行用户 IDAPython
-  -> ChangeRecorder 生成 changes.json
-  -> MCP apply_worker_changes dry-run
-  -> MCP apply_worker_changes dry_run=false
-  -> GUI /apply_changes
-  -> /inspect_address 验证 GUI mutation
-```
-
-建议实现方式：
+Run `26922985347` 已验证：
 
 ```text
-新增一个 guest python_script payload 或扩展现有 ida_api_test payload
-payload 复用现有插件安装和 IDA bootstrap 逻辑
-payload 启动 GUI IDA 插件，拿到 base_url/port/database_path
-payload 设置 IDA_SCRIPT_MCP_IDA_PATH 指向 guest IDA idat64/ida64
-payload 让 src/ida_script_mcp 在 guest 可 import
-payload 直接调用 ida_script_mcp.server.execute_idapython 或真实 MCP client
-worker 代码调用 mcp_changes.rename/comment/patch_bytes 或 IDA monkeypatch API
-payload 保存 execute_result.json 和 changes.json 摘要
-payload 调 apply_worker_changes dry-run 并确认不改 GUI
-payload 调 apply_worker_changes dry_run=false 并确认 GUI 改动可 inspect
-payload 最终写 v23_worker_chain_result.json
+execute_idapython
+-> headless IDA worker
+-> worker-generated ChangeSet(rename, comment)
+-> apply_worker_changes dry-run
+-> apply_worker_changes destructive replay
+-> inspect_address 验证 GUI mutation
 ```
 
-U001 通过的最低断言：
-
-```text
-execute_result.status == ok
-execute_result.isolated == true
-execute_result.job_id 非空
-execute_result.changes 至少包含一个 operation
-apply dry-run status == ok 且 applied=[]
-inspect dry-run 后 GUI 未变
-apply destructive status == ok 且 applied 非空
-inspect destructive 后 GUI 已变
-metadata destructive 后 dirty == true 或 apply_changes_mutation_flag == true
-```
+证据已经移入 `TESTED.md`。后续不要重复跑 U001，除非修改了 execute/worker/apply 链路。
 
 ### U002：worker hard timeout / kill process tree
 
@@ -386,6 +352,6 @@ rejected: GUI dirty / dirty unknown / identity missing
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进核心覆盖，直接做 U001 payload。
+4. 如果要推进下一项核心覆盖，直接做 U002 worker timeout payload。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。
