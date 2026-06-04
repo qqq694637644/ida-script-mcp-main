@@ -292,7 +292,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         with HEARTBEAT_PATH.open("a", encoding="utf-8") as output:
             output.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
             output.write("\n")
-        print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+        print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
 
     def _sha256(path: Path) -> str:
@@ -1287,7 +1287,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 }
             )
             _write_json(result_path, result)
-            print("IDA_PLUGIN_API_TEST_RESULT=" + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+            print(
+                "IDA_PLUGIN_API_TEST_RESULT="
+                + json.dumps(result, ensure_ascii=True, sort_keys=True),
+                flush=True,
+            )
 
         return 0 if result.get("status") == "passed" else 1
 
@@ -1304,7 +1308,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                         "message": str(exc),
                         "traceback": traceback.format_exc(),
                     },
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                     sort_keys=True,
                 ),
                 file=sys.stderr,

@@ -100,6 +100,8 @@ def test_build_guest_ida_api_test_script_accepts_functions_corner_mode() -> None
     assert "limit_zero" in script
     assert "offset_negative" in script
     assert "☃_unlikely_*[]" in script
+    assert "IDA_PLUGIN_API_TEST_RESULT=" in script
+    assert "ensure_ascii=True" in script
     assert "__IDA_API_TEST_MODE_JSON__" not in script
     outer_script = script.split("BOOTSTRAP_TEMPLATE", maxsplit=1)[0]
     assert "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__" not in outer_script
