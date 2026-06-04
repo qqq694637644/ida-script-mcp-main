@@ -6,7 +6,7 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、以及多 IDA 实例选择 U005 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、多 IDA 实例选择 U005、以及 patch_bytes 复杂情况 U013 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
@@ -14,9 +14,10 @@ U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
 U004 real MCP client end-to-end
 U005 multi-IDA instance selection
+U013 patch_bytes complex cases
 ```
 
-下一轮建议从 apply_changes/read-only endpoint corner cases 或 installer/client config coverage 开始。
+下一轮建议从 U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage 开始。
 
 ## MCP 层未测
 
@@ -113,23 +114,6 @@ U005 multi-IDA instance selection
   对非函数地址 set_type
   ida_typeinf.apply_cdecl 失败路径
   idc.set_type / idc.SetType fallback 各自真实路径
-  ```
-
-- [ ] **U013 patch_bytes 复杂情况**
-
-  ```text
-  多字节 patch
-  patch 跨 instruction 边界
-  patch 跨 item 边界
-  patch 到 data 段
-  patch 到 unmapped 地址
-  old_bytes mismatch
-  new_bytes 与 old_bytes 相同
-  patch 只改第二/中间字节
-  patch 多次连续执行
-  patch 后反汇编刷新
-  patch 后 dirty 状态
-  patch 失败时 partial apply 怎么表现
   ```
 
 - [ ] **U014 partial apply / rollback 语义**

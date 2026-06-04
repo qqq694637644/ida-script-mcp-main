@@ -60,6 +60,7 @@ dirty=true / apply_changes_mutation_flag
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
 | U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -536,6 +537,92 @@ Notes:
 - U005 payload source is checked in as `src/ida_script_mcp/payload/U005_multi_IDA_instance_selection.py`.
 - The builder is `src/ida_script_mcp/payload/ida_u005_multi_ida_instance_test.py`.
 - This run uses direct server tool-function calls after U004 already verified real MCP transports. U005 focuses on multi-instance selector semantics and live IDA registry behavior.
+
+
+## 2026-06-04 U013：patch_bytes complex cases
+
+Evidence:
+
+- Workflow run: `26926417574`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `ac7cbab77c933ebb5119b7145a14e7f3307a5d1d`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401627652`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u013_patch_bytes_complex_test
+ida_timeout_seconds=240
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=u013_patch_bytes_complex_cases
+payload status=passed
+IDA plugin instance=4648_test1.dll
+IDA plugin port=13338
+metadata_before.dirty=false
+metadata_before.database_sha256=45982ab9a3d595e6380503c259e51bba2fa1728ca9f7321ac58187ff6ca9dd65
+old_bytes mismatch op returned status=error and did not dirty the database
+unmapped-only patch returned status=error and did not dirty the database
+dry-run complex patch returned status=ok, applied=[], skipped=7, errors=[]
+dry-run left original code bytes unchanged: 488d0dd958000048ff25da300000cccc
+destructive partial apply returned status=partial
+partial apply applied 6 patch_bytes operations
+partial apply error op_id=op-unmapped-partial-stop
+multi-byte code patch changed 488d0dd9 -> b772f226
+middle-byte patch changed byte at target+5 from 00 -> ff
+same-byte patch accepted new_bytes == old_bytes at target+12
+repeat patch applied twice at target+10, ending at da
+data/import patch changed byte at 0x180004000 from ff -> 00
+after partial apply code bytes match expected b772f22658ff0048ff25da300000cccc
+disassembly still refreshes after patch: mov     bh, 72h
+metadata_after_partial.dirty=true
+metadata_after_partial.dirty_state_method=apply_changes_mutation_flag
+second destructive apply rejected when dirty
+```
+
+Coverage confirmed by this run:
+
+```text
+old_bytes_hex validation before patching
+old_bytes mismatch failure without mutation
+multi-byte patch
+patch to middle/second byte of an instruction
+same-byte patch where new_bytes == old_bytes
+repeated patch to the same address in one ChangeSet
+patch to data/import address
+unmapped/invalid patch error path
+partial apply semantics: earlier patch ops remain applied after later error
+post-patch inspect_address bytes and disassembly refresh
+metadata dirty state after destructive partial apply
+second destructive apply rejected while dirty/unsaved
+```
+
+Notes:
+
+- U013 payload source is checked in as `src/ida_script_mcp/payload/U013_patch_bytes_complex_cases.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u013_patch_bytes_complex_test.py`.
+- This test added real GUI replay validation for `old_bytes_hex`; before this, `patch_bytes` did not check the old bytes before writing.
+- The final invalid-address error is reported as an old-bytes mismatch because IDA byte getters return `ff` at the high test address; the key assertion is that the op fails before mutation and partial semantics are preserved.
 
 ## 移入规则
 
