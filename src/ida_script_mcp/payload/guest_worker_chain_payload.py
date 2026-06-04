@@ -744,6 +744,7 @@ def _run_worker_timeout(
                 os.environ[key] = value
 
 
+def _read_process_pipes(process: subprocess.Popen) -> tuple[str, str]:
     try:
         stdout, stderr = process.communicate(timeout=10)
     except Exception:
