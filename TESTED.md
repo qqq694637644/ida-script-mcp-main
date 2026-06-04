@@ -60,6 +60,7 @@ dirty=true / apply_changes_mutation_flag
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
 | U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U007 `/decompile` corner case | workflow run `26926171098`, artifact `7401525174` | start/middle/name decompile, no-function/invalid/missing-name structured errors, thunk/import, largest function, Hex-Rays pseudocode path |
 | U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
@@ -538,6 +539,87 @@ Notes:
 - The builder is `src/ida_script_mcp/payload/ida_u005_multi_ida_instance_test.py`.
 - This run uses direct server tool-function calls after U004 already verified real MCP transports. U005 focuses on multi-instance selector semantics and live IDA registry behavior.
 
+
+
+## 2026-06-04 U007：`/decompile` corner case
+
+Evidence:
+
+- Workflow run: `26926171098`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit tested: `gpt/u007-decompile-corner-case-20260604-4e30cb` / `4c6b04e495122fdd15c5c5160c601cc6da6ef5d5`
+- Merged to handoff branch by merge commit: `9d1cd213d496a8f742d752aa9a22a38984037ea4`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401525174`
+- Files inspected: `result.json`, workflow run/job status
+
+Inputs:
+
+```text
+task_action=ida_plugin_u007_decompile_corner_case_test
+ida_timeout_seconds=180
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload status=passed
+IDA plugin instance=8564_test1.dll
+IDA plugin port=13338
+primary function=OpenPerformanceData
+primary function size=1099
+/decompile by start address found=true, pseudocode present, disassembly present
+/decompile by middle address found=true and resolves same function
+/decompile by function name found=true and resolves same function
+/decompile missing name returns found=false with structured error
+/decompile invalid address returns found=false with structured error
+/decompile address 0x0 returns found=false with structured no-function error
+/decompile thunk/import-like function RegQueryValueExW found=true, is_thunk=true, pseudocode/disassembly present
+/decompile largest observed function completed within timeout and returned disassembly
+timings recorded for all U007 decompile probes
+```
+
+Coverage confirmed by this run:
+
+```text
+/decompile address at function start
+/decompile address inside function body
+/decompile name query
+/decompile missing-name structured error
+/decompile invalid-address structured error
+/decompile address outside any function structured error
+/decompile thunk/import-like function
+/decompile largest observed function timing path
+Hex-Rays available path returns pseudocode
+read-only /decompile path leaves GUI database dirty=false
+```
+
+Known unobserved branches:
+
+```text
+Hex-Rays unavailable/no-license path was not observed because this guest had Hex-Rays available.
+Per-function Hex-Rays failure while disassembly remains available was not observed in test1.dll.
+Duplicate function-name ambiguity was not force-created in this read-only payload.
+```
+
+Notes:
+
+- U007 payload builder is checked in as `src/ida_script_mcp/payload/ida_u007_decompile_corner_case_test.py`.
+- U007 reuses the existing `ida_api_test` guest payload framework with `test_mode=decompile_corner_case`.
+- This closes the practical `/decompile` read-only corner-case smoke for the current disposable VM + `test1.dll` baseline. The unobserved branches above remain listed in `UNTESTED.md` as environment/data-construction follow-ups.
 
 ## 2026-06-04 U013：patch_bytes complex cases
 
