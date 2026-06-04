@@ -107,6 +107,8 @@ def test_build_guest_ida_api_test_script_accepts_inspect_address_mode() -> None:
     assert "inspect_seeded_unicode_address" in script
     assert "U009 regular 注释" in script
     assert "U009 repeatable function 注释" in script
+    assert 'print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=True' in script
+    assert 'print("IDA_PLUGIN_API_TEST_RESULT=" + json.dumps(result, ensure_ascii=True' in script
     assert "__IDA_API_TEST_MODE_JSON__" not in script
     outer_script = script.split("BOOTSTRAP_TEMPLATE", maxsplit=1)[0]
     assert "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__" not in outer_script
