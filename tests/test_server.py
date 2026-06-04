@@ -136,6 +136,14 @@ class TestExecuteIdapython:
             "ida_script_mcp.server.resolve_target",
             lambda _params: (13338, "sample.exe", "sample.exe"),
         )
+        monkeypatch.setattr(
+            "ida_script_mcp.server.list_instances",
+            lambda: {"sample.exe": {"port": 13338, "pid": 4242}},
+        )
+        monkeypatch.setattr(
+            "ida_script_mcp.server._get_process_executable_path",
+            lambda pid: r"C:\IDA\ida64.exe" if pid == 4242 else None,
+        )
 
         def fake_make_ida_request(endpoint, **kwargs):
             calls.append((endpoint, kwargs))
@@ -149,6 +157,8 @@ class TestExecuteIdapython:
 
                 assert request.code == "result = 1"
                 assert gui_context["database_path"] == __file__
+                assert gui_context["gui_pid"] == 4242
+                assert gui_context["gui_executable_path"] == r"C:\IDA\ida64.exe"
                 assert instance_id == "sample.exe"
                 assert port == 13338
                 assert collect_changes is True

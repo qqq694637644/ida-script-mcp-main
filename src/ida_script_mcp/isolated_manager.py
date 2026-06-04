@@ -53,21 +53,37 @@ def _keep_jobs_enabled() -> bool:
     raise ValueError("IDA_SCRIPT_MCP_KEEP_JOBS must be exactly 0 or 1")
 
 
-def _discover_ida_path() -> Path | None:
-    explicit = os.environ.get("IDA_SCRIPT_MCP_IDA_PATH")
-    if explicit:
-        path = Path(explicit)
-        return path if path.exists() else None
-    mode = os.environ.get("IDA_SCRIPT_MCP_WORKER_MODE", "auto").lower()
-    if mode not in {"auto", "ida", "idat"}:
-        return None
-    names = (
+def _worker_candidate_names(mode: str) -> list[str]:
+    base_names = (
         ["idat64", "idat", "ida64", "ida"]
         if mode == "auto"
         else (["ida64", "ida"] if mode == "ida" else ["idat64", "idat"])
     )
     if sys.platform == "win32":
-        names = [f"{name}.exe" for name in names]
+        return [f"{name}.exe" for name in base_names]
+    return base_names + [f"{name}.exe" for name in base_names]
+
+
+def _discover_ida_path(gui_context: dict[str, Any] | None = None) -> Path | None:
+    mode = os.environ.get("IDA_SCRIPT_MCP_WORKER_MODE", "auto").lower()
+    if mode not in {"auto", "ida", "idat"}:
+        return None
+    names = _worker_candidate_names(mode)
+
+    gui_executable_path = None if gui_context is None else gui_context.get("gui_executable_path")
+    if gui_executable_path:
+        gui_path = Path(str(gui_executable_path))
+        gui_dir = gui_path.parent
+        for name in names:
+            candidate = gui_dir / name
+            if candidate.exists():
+                return candidate
+
+    explicit = os.environ.get("IDA_SCRIPT_MCP_IDA_PATH")
+    if explicit:
+        path = Path(explicit)
+        return path if path.exists() else None
+
     for name in names:
         found = shutil.which(name)
         if found:
@@ -192,7 +208,7 @@ class IsolatedExecutionManager:
                 job_id=job_id,
             )
 
-        ida_path = self.ida_path or _discover_ida_path()
+        ida_path = self.ida_path or _discover_ida_path(gui_context)
         if ida_path is None or not ida_path.exists():
             return self._failure(
                 "worker_start_error",

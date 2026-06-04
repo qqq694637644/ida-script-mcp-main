@@ -348,6 +348,33 @@ def is_process_alive(pid: int) -> bool:
         return False
 
 
+def _get_process_executable_path(pid: int) -> str | None:
+    """Return the executable path for a Windows process id."""
+    import sys
+
+    if pid <= 0 or sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        process_query_limited_information = 0x1000
+        handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+        if not handle:
+            return None
+        try:
+            size = wintypes.DWORD(32768)
+            buffer = ctypes.create_unicode_buffer(size.value)
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                return buffer.value
+            return None
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return None
+
+
 def list_instances() -> dict[str, dict[str, Any]]:
     """List all registered live IDA instances."""
     try:
@@ -777,6 +804,21 @@ async def execute_idapython(params: ExecuteScriptInput) -> dict[str, Any]:
             port=port,
             isolated=True,
         ).model_dump(mode="json")
+
+    instances = list_instances()
+    instance_info = instances.get(resolved_instance_id or "")
+    if instance_info is None:
+        for candidate in instances.values():
+            if candidate.get("port") == port:
+                instance_info = candidate
+                break
+    if instance_info is not None and instance_info.get("pid"):
+        gui_pid = int(instance_info["pid"])
+        gui_context = dict(gui_context)
+        gui_context["gui_pid"] = gui_pid
+        gui_executable_path = _get_process_executable_path(gui_pid)
+        if gui_executable_path:
+            gui_context["gui_executable_path"] = gui_executable_path
 
     manager = IsolatedExecutionManager()
     result = manager.execute(

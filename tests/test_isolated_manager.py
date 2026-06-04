@@ -189,6 +189,74 @@ def test_successful_worker_result_uses_arg_list_and_reads_changes(tmp_path, monk
     assert result.artifacts_retained is True
 
 
+def test_worker_discovery_prefers_gui_executable_directory(tmp_path, monkeypatch):
+    monkeypatch.delenv("IDA_SCRIPT_MCP_IDA_PATH", raising=False)
+    monkeypatch.delenv("IDA_SCRIPT_MCP_WORKER_MODE", raising=False)
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    ida_dir = tmp_path / "ida"
+    ida_dir.mkdir()
+    gui_ida = ida_dir / "ida64.exe"
+    gui_ida.write_text("gui", encoding="utf-8")
+    worker_ida = ida_dir / "idat64.exe"
+    worker_ida.write_text("worker", encoding="utf-8")
+    captured = {}
+
+    def popen(args, **kwargs):
+        captured["args"] = args
+        job_dir = Path(kwargs["cwd"])
+        (job_dir / "result.json").write_text(
+            ExecuteResult(status="ok", result=1).model_dump_json(), encoding="utf-8"
+        )
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db, gui_executable_path=str(gui_ida)),
+        instance_id="sample",
+        port=13338,
+    )
+
+    assert captured["args"][0] == str(worker_ida)
+    assert result.status == "ok"
+
+
+def test_worker_discovery_falls_back_to_env_when_gui_directory_has_no_worker(
+    tmp_path, monkeypatch
+):
+    db = tmp_path / "sample.i64"
+    db.write_bytes(b"db")
+    gui_dir = tmp_path / "gui-only"
+    gui_dir.mkdir()
+    gui_ida = gui_dir / "ida64.exe"
+    gui_ida.write_text("gui", encoding="utf-8")
+    env_ida = tmp_path / "idat64-env.exe"
+    env_ida.write_text("worker", encoding="utf-8")
+    monkeypatch.setenv("IDA_SCRIPT_MCP_IDA_PATH", str(env_ida))
+    monkeypatch.setenv("IDA_SCRIPT_MCP_WORKER_MODE", "idat")
+    captured = {}
+
+    def popen(args, **kwargs):
+        captured["args"] = args
+        job_dir = Path(kwargs["cwd"])
+        (job_dir / "result.json").write_text(
+            ExecuteResult(status="ok", result=1).model_dump_json(), encoding="utf-8"
+        )
+        return FakeProcess(exit_code=0)
+
+    manager = IsolatedExecutionManager(work_dir=tmp_path / "jobs", popen=popen)
+    result = manager.execute(
+        ExecuteRequest(code="result = 1"),
+        gui_context=_gui_context(db, gui_executable_path=str(gui_ida)),
+        instance_id="sample",
+        port=13338,
+    )
+
+    assert captured["args"][0] == str(env_ida)
+    assert result.status == "ok"
+
+
 def test_missing_result_classified_by_exit_code(tmp_path):
     db = tmp_path / "sample.i64"
     db.write_bytes(b"db")
