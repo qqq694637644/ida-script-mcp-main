@@ -61,6 +61,7 @@ restore_extra_args_json=[]
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
 | U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
 | U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
+| U008 `/xrefs` corner case | Passed | `26926339324`, artifact `7401576197` |
 
 ### Final full-smoke coverage
 

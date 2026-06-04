@@ -60,6 +60,7 @@ dirty=true / apply_changes_mutation_flag
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
 | U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U008 `/xrefs` corner case | workflow run `26926339324`, artifact `7401576197` | code/data/flow filters, limit boundaries, name/missing-name, import thunk, string/data, cycle/backedge, dirty=false |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -536,6 +537,68 @@ Notes:
 - U005 payload source is checked in as `src/ida_script_mcp/payload/U005_multi_IDA_instance_selection.py`.
 - The builder is `src/ida_script_mcp/payload/ida_u005_multi_ida_instance_test.py`.
 - This run uses direct server tool-function calls after U004 already verified real MCP transports. U005 focuses on multi-instance selector semantics and live IDA registry behavior.
+
+
+## 2026-06-04 U008：`/xrefs` corner case
+
+Evidence:
+
+- Workflow run: `26926339324`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/test-u008-xrefs-corner-case-20260604-1c85e4` / `af1425208d0ce1123c1d6cf3a5372199856ee7d2`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401576197`
+- Files inspected: `result.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u008_xrefs_corner_case_test
+ida_timeout_seconds=180
+run_timeout_seconds=300
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Artifact assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u008_xrefs_corner_cases
+payload status=passed
+payload check_count=53
+discovered target keys=code_from, cycle_or_backedge, data_from_code, flow_from, import_thunk, multi_xrefs, name_query, string_data
+code xref_kind returned only is_code refs
+data xref_kind returned only non-code refs
+flow xref_kind returned ordinary_flow refs with is_flow=true
+limit=1 returned exactly one xref and truncated=true
+limit=0 returned zero xrefs and preserved effective limit=0
+negative limit returned structured error and zero xrefs
+non-integer limit returned structured error and zero xrefs
+huge limit 100000 clamped to 5000 with limit_clamped=true
+name query `_guard_dispatch_icall_nop` returned 14 xrefs
+missing name returned found=false with structured error
+import thunk target `RegQueryValueExW` resolved and returned structured xrefs
+string/data target `perfmondata.dll` returned data xrefs
+cycle/backedge target `OpenPerformanceData` found a real backward jump; fallback=false
+metadata_before_u008_xrefs.dirty=false
+metadata_after_u008_xrefs.dirty=false
+```
+
+Implementation notes:
+
+- U008 payload source is checked in as `src/ida_script_mcp/payload/U008_xrefs_corner_cases.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u008_xrefs_corner_case_test.py`.
+- The run also verified the new `/xrefs` `flow` filter and structured direct-HTTP limit handling for `0`, negative, non-integer, and oversized limits.
 
 ## 移入规则
 

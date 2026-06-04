@@ -48,19 +48,6 @@ U005 multi-IDA instance selection
   反编译异常但 disassembly 可用
   ```
 
-- [ ] **U008 `/xrefs` corner case**
-
-  ```text
-  code/data/flow 三种 xref_kind 的真实过滤
-  大量 xrefs 超过 limit
-  limit=0/负数/超大值
-  name 查询
-  name 不存在
-  地址是 import thunk
-  地址是 string/data
-  自引用/循环引用
-  ```
-
 - [ ] **U009 `/inspect_address` 系统测试**
 
   ```text
