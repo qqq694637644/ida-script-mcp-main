@@ -116,6 +116,24 @@ def test_build_guest_ida_worker_chain_test_script_contains_checked_sources() -> 
     compile(script, "<generated_worker_chain_payload>", "exec")
 
 
+def test_build_guest_ida_worker_timeout_test_script_contains_checked_sources() -> None:
+    script = build_guest_ida_worker_chain_test_script(test_mode="worker_timeout")
+
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in script
+    assert "WORKER_CHAIN_STAGE=" in script
+    assert 'TEST_MODE = "worker_timeout"' in script
+    assert "worker_timeout_user_script.py" in script
+    assert "worker_timeout_execute_start" in script
+    assert "hard_timeout" in script
+    assert "killed" in script
+    assert "worker_process_alive_after_kill" in script
+    assert "IDA_SCRIPT_MCP_WORKER_TIMEOUT_SENTINEL" in script
+    assert "__TEST_MODE_JSON__" not in script
+    assert "__USER_SCRIPT_FILENAME_JSON__" not in script
+    assert "__USER_SCRIPT_B64_JSON__" not in script
+    compile(script, "<generated_worker_timeout_payload>", "exec")
+
+
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workflow_path = (
@@ -126,6 +144,18 @@ def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
     assert "ida_plugin_worker_chain_test" in workflow
     assert "ida_plugin_worker_chain_test_payload.py" in workflow
     assert "ida_script_mcp.payload.ida_worker_chain_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_worker_timeout_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_worker_timeout_test" in workflow
+    assert "ida_plugin_worker_timeout_test_payload.py" in workflow
+    assert "--test-mode worker_timeout" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
@@ -213,5 +243,32 @@ def test_generated_worker_chain_payload_reports_missing_ida_dir(tmp_path) -> Non
     assert result.returncode == 1
     assert "IDA_WORKER_CHAIN_TEST_RESULT=" in result.stdout
     assert '"mode": "worker_chain"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_worker_timeout_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "worker_timeout_payload.py"
+    script_path.write_text(
+        build_guest_ida_worker_chain_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+            test_mode="worker_timeout",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in result.stdout
+    assert '"mode": "worker_timeout"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "validate_inputs_start" in result.stdout

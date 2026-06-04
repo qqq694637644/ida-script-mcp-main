@@ -16,6 +16,8 @@ from pathlib import Path
 
 IDA_DIR = "__IDA_DIR_JSON__"
 DLL_PATH = "__DLL_PATH_JSON__"
+TEST_MODE = "__TEST_MODE_JSON__"
+USER_SCRIPT_FILENAME = "__USER_SCRIPT_FILENAME_JSON__"
 IDA_TIMEOUT_SECONDS = int("__IDA_TIMEOUT_SECONDS_JSON__")
 IDA_READY_TIMEOUT_SECONDS = min(60, max(15, IDA_TIMEOUT_SECONDS // 3))
 IDA_EXECUTABLE_CANDIDATES = "__IDA_EXECUTABLE_CANDIDATES_JSON__"
@@ -283,7 +285,7 @@ def _install_runtime_package_files() -> Path:
 
 
 def _write_worker_user_script() -> Path:
-    user_script = WORK_DIR / "worker_chain_user_script.py"
+    user_script = WORK_DIR / USER_SCRIPT_FILENAME
     content = base64.b64decode(USER_SCRIPT_B64.encode("ascii"))
     _write_bytes_atomic(user_script, content)
     digest = _sha256(user_script)
@@ -481,6 +483,7 @@ def _run_worker_chain(
         "IDA_SCRIPT_MCP_IDA_PATH",
         "IDA_SCRIPT_MCP_WORK_DIR",
         "IDA_SCRIPT_MCP_KEEP_JOBS",
+        "IDA_SCRIPT_MCP_WORKER_TIMEOUT_SENTINEL",
         "IDA_SCRIPT_MCP_WORKER_CHAIN_TARGET_EA",
         "IDA_SCRIPT_MCP_WORKER_CHAIN_NEW_NAME",
         "IDA_SCRIPT_MCP_WORKER_CHAIN_COMMENT",
@@ -612,7 +615,135 @@ def _run_worker_chain(
                 os.environ[key] = value
 
 
-def _read_process_pipes(process: subprocess.Popen) -> tuple[str, str]:
+def _pid_exists(pid: int | None) -> bool:
+    if pid is None:
+        return False
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {int(pid)}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return False
+    return str(int(pid)) in (completed.stdout or "")
+
+
+def _run_worker_timeout(
+    ready: dict,
+    base_url: str,
+    ida_dir: Path,
+    user_script: Path,
+    result: dict,
+) -> None:
+    health = _health_with_retry(base_url)
+    result["responses"]["health"] = health["body"]
+    _check(result, "health reports plugin name", health["body"].get("plugin") == "IDA-Script-MCP", health["body"])
+
+    metadata_before = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+    result["responses"]["metadata_before"] = metadata_before["body"]
+    _check(
+        result,
+        "metadata clean before timeout execution",
+        metadata_before["body"].get("dirty_state_known") is True and metadata_before["body"].get("dirty") is False,
+        metadata_before["body"],
+    )
+
+    runtime_root = _install_runtime_package_files()
+    worker_ida = _select_worker_ida_executable(ida_dir)
+    worker_jobs = WORK_DIR / "worker_jobs"
+    sentinel_path = WORK_DIR / "worker_timeout_started.txt"
+    env_keys = [
+        "IDA_SCRIPT_MCP_IDA_PATH",
+        "IDA_SCRIPT_MCP_WORK_DIR",
+        "IDA_SCRIPT_MCP_KEEP_JOBS",
+        "IDA_SCRIPT_MCP_WORKER_TIMEOUT_SENTINEL",
+    ]
+    previous_env = {key: os.environ.get(key) for key in env_keys}
+    os.environ["IDA_SCRIPT_MCP_IDA_PATH"] = str(worker_ida)
+    os.environ["IDA_SCRIPT_MCP_WORK_DIR"] = str(worker_jobs)
+    os.environ["IDA_SCRIPT_MCP_KEEP_JOBS"] = "1"
+    os.environ["IDA_SCRIPT_MCP_WORKER_TIMEOUT_SENTINEL"] = str(sentinel_path)
+    _stage(
+        "worker_timeout_runtime_prepare_done",
+        {"runtime_root": str(runtime_root), "worker_ida": str(worker_ida), "user_script": str(user_script)},
+    )
+
+    try:
+        import asyncio
+        from ida_script_mcp import server as mcp_server
+
+        class ExecuteParams:
+            instance_id = None
+            port = int(ready["port"])
+            code = None
+            script_path = str(user_script)
+            capture_output = True
+            timeout_seconds = 2
+            collect_changes = True
+
+            def to_execute_request(self):
+                return mcp_server.ExecuteRequest.model_validate(
+                    {
+                        "code": self.code,
+                        "script_path": self.script_path,
+                        "capture_output": self.capture_output,
+                        "timeout_seconds": self.timeout_seconds,
+                    }
+                )
+
+        _stage("worker_timeout_execute_start", {"port": int(ready["port"]), "timeout_seconds": 2})
+        execute_result = asyncio.run(mcp_server.execute_idapython(ExecuteParams()))
+        result["responses"]["execute_idapython_timeout"] = execute_result
+        _check(result, "timeout execute status", execute_result.get("status") == "timeout", execute_result)
+        _check(result, "timeout execute isolated true", execute_result.get("isolated") is True, execute_result)
+        _check(result, "timeout hard_timeout true", execute_result.get("hard_timeout") is True, execute_result)
+        _check(result, "timeout killed true", execute_result.get("killed") is True, execute_result)
+        _check(result, "timeout worker_pid recorded", execute_result.get("worker_pid") is not None, execute_result)
+        _check(result, "timeout worker_exit_code recorded", execute_result.get("worker_exit_code") is not None, execute_result)
+        _check(result, "timeout worker process gone", not _pid_exists(execute_result.get("worker_pid")), execute_result)
+        _check(result, "timeout user script reached blocking section", sentinel_path.is_file(), {"sentinel": str(sentinel_path)})
+        _check(result, "timeout produced no changes", execute_result.get("changes") == [], execute_result)
+        _stage(
+            "worker_timeout_execute_done",
+            {
+                "status": execute_result.get("status"),
+                "worker_pid": execute_result.get("worker_pid"),
+                "worker_exit_code": execute_result.get("worker_exit_code"),
+                "killed": execute_result.get("killed"),
+            },
+        )
+
+        metadata_after = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+        result["responses"]["metadata_after_timeout"] = metadata_after["body"]
+        _check(result, "metadata stays clean after timeout", metadata_after["body"].get("dirty") is False, metadata_after["body"])
+        _check(
+            result,
+            "apply_changes mutation flag stays false after timeout",
+            metadata_after["body"].get("apply_changes_mutated") is False,
+            metadata_after["body"],
+        )
+        result["worker_timeout_summary"] = {
+            "status": execute_result.get("status"),
+            "hard_timeout": execute_result.get("hard_timeout"),
+            "killed": execute_result.get("killed"),
+            "worker_pid": execute_result.get("worker_pid"),
+            "worker_exit_code": execute_result.get("worker_exit_code"),
+            "worker_process_alive_after_kill": _pid_exists(execute_result.get("worker_pid")),
+            "sentinel_path": str(sentinel_path),
+            "sentinel_seen": sentinel_path.is_file(),
+            "metadata_dirty_after_timeout": metadata_after["body"].get("dirty"),
+        }
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
     try:
         stdout, stderr = process.communicate(timeout=10)
     except Exception:
@@ -626,7 +757,7 @@ def main() -> int:
     stdout = ""
     stderr = ""
     process = None
-    result: dict = {"status": "failed", "mode": "worker_chain", "dll_path": DLL_PATH, "work_dir": str(WORK_DIR), "checks": [], "responses": {}}
+    result: dict = {"status": "failed", "mode": TEST_MODE, "dll_path": DLL_PATH, "work_dir": str(WORK_DIR), "checks": [], "responses": {}}
 
     try:
         _stage("validate_inputs_start", {"ida_dir": str(ida_dir), "dll_path": str(dll_path)})
@@ -663,7 +794,12 @@ def main() -> int:
 
         ready = _wait_for_ready(process, READY_PATH, IDA_LOG_PATH)
         result["ready"] = ready
-        _run_worker_chain(ready, str(ready["base_url"]), ida_dir, user_script, result)
+        if TEST_MODE == "worker_timeout":
+            _run_worker_timeout(ready, str(ready["base_url"]), ida_dir, user_script, result)
+        elif TEST_MODE == "worker_chain":
+            _run_worker_chain(ready, str(ready["base_url"]), ida_dir, user_script, result)
+        else:
+            raise RuntimeError(f"Unsupported worker payload TEST_MODE: {TEST_MODE!r}")
         result.update(
             {
                 "status": "passed",

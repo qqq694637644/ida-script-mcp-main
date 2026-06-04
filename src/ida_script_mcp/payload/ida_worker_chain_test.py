@@ -74,13 +74,23 @@ def build_guest_ida_worker_chain_test_script(
     ida_dir: str = DEFAULT_GUEST_IDA_DIR,
     dll_path: str = DEFAULT_GUEST_DLL_PATH,
     ida_timeout_seconds: int = DEFAULT_IDA_TIMEOUT_SECONDS,
+    test_mode: str = "worker_chain",
     source_root: Path | None = None,
 ) -> str:
-    """Build a standalone guest script for the V2.3 worker-chain test."""
+    """Build a standalone guest script for V2.3 worker-chain lifecycle tests."""
+
+    user_script_name_by_mode = {
+        "worker_chain": "worker_chain_user_script.py",
+        "worker_timeout": "worker_timeout_user_script.py",
+    }
+    try:
+        user_script_name = user_script_name_by_mode[test_mode]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported worker test mode: {test_mode!r}") from exc
 
     install_files = _read_install_files(source_root)
     runtime_files = _read_runtime_package_files(source_root)
-    user_script_path = _payload_source_dir() / "worker_chain_user_script.py"
+    user_script_path = _payload_source_dir() / user_script_name
     template_path = _payload_source_dir() / "guest_worker_chain_payload.py"
     user_script = user_script_path.read_bytes()
     script = template_path.read_text(encoding="utf-8")
@@ -88,6 +98,8 @@ def build_guest_ida_worker_chain_test_script(
     replacements = {
         '"__IDA_DIR_JSON__"': json.dumps(ida_dir),
         '"__DLL_PATH_JSON__"': json.dumps(dll_path),
+        '"__TEST_MODE_JSON__"': json.dumps(test_mode),
+        '"__USER_SCRIPT_FILENAME_JSON__"': json.dumps(user_script_name),
         '"__IDA_TIMEOUT_SECONDS_JSON__"': json.dumps(ida_timeout_seconds),
         '"__IDA_EXECUTABLE_CANDIDATES_JSON__"': json.dumps(list(IDA_EXECUTABLE_CANDIDATES)),
         '"__LEGACY_ROOT_SUPPORT_FILES_JSON__"': json.dumps(list(LEGACY_ROOT_SUPPORT_FILES)),
@@ -106,6 +118,8 @@ def build_guest_ida_worker_chain_test_script(
         for token in (
             "__IDA_DIR_JSON__",
             "__DLL_PATH_JSON__",
+            "__TEST_MODE_JSON__",
+            "__USER_SCRIPT_FILENAME_JSON__",
             "__IDA_TIMEOUT_SECONDS_JSON__",
             "__PLUGIN_FILES_B64_JSON__",
             "__RUNTIME_FILES_B64_JSON__",
@@ -123,6 +137,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ida-dir", default=DEFAULT_GUEST_IDA_DIR)
     parser.add_argument("--dll-path", default=DEFAULT_GUEST_DLL_PATH)
     parser.add_argument("--ida-timeout-seconds", type=int, default=DEFAULT_IDA_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--test-mode",
+        default="worker_chain",
+        choices=["worker_chain", "worker_timeout"],
+    )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
 
@@ -136,6 +155,7 @@ def main(argv: list[str] | None = None) -> None:
             ida_dir=args.ida_dir,
             dll_path=args.dll_path,
             ida_timeout_seconds=args.ida_timeout_seconds,
+            test_mode=args.test_mode,
         ),
         encoding="utf-8",
     )
