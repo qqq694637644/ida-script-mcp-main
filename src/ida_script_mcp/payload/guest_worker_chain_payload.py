@@ -1264,21 +1264,30 @@ def _run_u012_set_type_complex(
         nonfunction = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(nonfunction_payload)))
         result["responses"]["u012_nonfunction_address"] = nonfunction
         nonfunction_outcome_count = len(nonfunction.get("applied") or []) + len(nonfunction.get("errors") or [])
-        result["u012_set_type_summary"]["nonfunction_address_status"] = nonfunction.get("status")
+        nonfunction_status = nonfunction.get("status")
+        result["u012_set_type_summary"]["nonfunction_address_status"] = nonfunction_status
         result["u012_set_type_summary"]["nonfunction_address_applied"] = len(nonfunction.get("applied") or [])
         result["u012_set_type_summary"]["nonfunction_address_errors"] = len(nonfunction.get("errors") or [])
         _check(
             result,
             "U012 non-function set_type returns a terminal status",
-            nonfunction.get("status") in {"ok", "error"},
+            nonfunction_status in {"ok", "error", "rejected"},
             nonfunction,
         )
-        _check(
-            result,
-            "U012 non-function set_type reports one operation outcome",
-            nonfunction_outcome_count == 1,
-            nonfunction,
-        )
+        if nonfunction_status == "rejected":
+            _check(
+                result,
+                "U012 non-function set_type rejection explains dirty database",
+                "unsaved changes" in (nonfunction.get("message") or "").lower(),
+                nonfunction,
+            )
+        else:
+            _check(
+                result,
+                "U012 non-function set_type reports one operation outcome",
+                nonfunction_outcome_count == 1,
+                nonfunction,
+            )
         _stage("u012_set_type_complex_done", result["u012_set_type_summary"])
     finally:
         for key, value in previous_env.items():
