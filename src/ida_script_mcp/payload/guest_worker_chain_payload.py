@@ -817,13 +817,17 @@ def _run_worker_failure_matrix(
             import asyncio
             from ida_script_mcp import server as mcp_server
 
+            case_port = int(ready["port"])
+            case_script_path = str(script_path)
+            case_timeout_seconds = int(timeout_seconds)
+
             class ExecuteParams:
                 instance_id = None
-                port = int(ready["port"])
+                port = case_port
                 code = None
-                script_path = str(script_path)
+                script_path = case_script_path
                 capture_output = True
-                timeout_seconds = int(timeout_seconds)
+                timeout_seconds = case_timeout_seconds
                 collect_changes = True
 
                 def to_execute_request(self):
