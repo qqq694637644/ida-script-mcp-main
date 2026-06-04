@@ -414,7 +414,9 @@ def test_apply_changes_patch_bytes_falls_back_to_patch_byte(monkeypatch):
         sys.modules,
         "ida_bytes",
         types.SimpleNamespace(
-            get_bytes=lambda ea, size: b"\x55\x8b" if ea == 0x1000 and size == 2 else b"\x00" * size,
+            get_bytes=lambda ea, size: (
+                b"\x55\x8b" if ea == 0x1000 and size == 2 else b"\x00" * size
+            ),
             patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or False,
             patch_byte=lambda ea, value: calls.append(("patch_byte", ea, value)) or True,
         ),

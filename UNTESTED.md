@@ -19,7 +19,7 @@ U007 /decompile corner case
 U013 patch_bytes complex cases
 ```
 
-U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 U006R、U008 `/xrefs`、U009 `/inspect_address`，或 U010/U011/U012/U014 apply_changes / installer / client config coverage 开始。
+U006 `/functions` 主要边界语义已由 workflow run `26925694907` 覆盖并移入 `TESTED.md`；仍保留 fixture-dependent residuals。下一轮建议从 U006R、U009 `/inspect_address`，或 U010/U011/U012/U014 apply_changes / installer / client config coverage 开始。
 
 
 ## 已测项目的专门环境补测
@@ -65,19 +65,6 @@ U007 已在当前 disposable VM + `test1.dll` 基线上通过并移入 `TESTED.m
   ```
 
   已覆盖并移入 `TESTED.md` 的 U006 范围：segment 过滤、include_thunks/include_library_functions matrix、name_contains 大小写/Unicode/特殊字符输入、limit=0/负数/超大值/非整数、offset 负数/非整数、name_contains/segment/boolean flag 类型错误、numeric string 参数。
-
-- [ ] **U008 `/xrefs` corner case**
-
-  ```text
-  code/data/flow 三种 xref_kind 的真实过滤
-  大量 xrefs 超过 limit
-  limit=0/负数/超大值
-  name 查询
-  name 不存在
-  地址是 import thunk
-  地址是 string/data
-  自引用/循环引用
-  ```
 
 - [ ] **U009 `/inspect_address` 系统测试**
 
