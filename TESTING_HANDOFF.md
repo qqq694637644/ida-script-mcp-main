@@ -133,11 +133,6 @@ python_script
 ida_plugin_install
 ida_plugin_api_test
 ida_plugin_apply_changes_test
-ida_plugin_worker_chain_test
-ida_plugin_worker_timeout_test
-ida_plugin_worker_failure_matrix_test
-ida_plugin_u004_real_mcp_client_test
-ida_plugin_u009_inspect_address_test
 ```
 
 ### 非破坏性 full smoke
@@ -180,65 +175,52 @@ restore_extra_args_json=[]
 
 它验证 GUI `/apply_changes`，包括 dry-run、bad fingerprint、destructive apply、dirty rejection。它仍然不等于 U001，因为它没有通过 MCP `execute_idapython` 生成 worker `ChangeSet`。
 
-### U009 `/inspect_address` system test
-
-```text
-task_action=ida_plugin_u009_inspect_address_test
-ida_timeout_seconds=240
-run_timeout_seconds=900
-connect_timeout_seconds=600
-ida_dir=C:\Users\alion\Desktop\IDAPro8.3
-dll_path=C:\Users\alion\Desktop\test1.dll
-controller_url=http://192.168.1.249:8766
-port=8766
-run_vmware_restore=true
-restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
-restore_gui=true
-restore_extra_args_json=[]
-```
-
-它验证 GUI `/inspect_address` 的 invalid/missing target、`byte_count` 边界、data/instruction-middle/unmapped 地址、name lookup、Unicode comments、repeatable comments、type readback，以及 repeated inspect 后 GUI DB 仍 clean。
-
-
 ## 5. 当前最新一次测试结果
 
-刚跑完的 U009 `/inspect_address` 系统测试：
+刚跑完的 baseline：
 
 | 字段 | 值 |
 | --- | --- |
-| Workflow run | `26926388631` |
+| Workflow run | `26921994480` |
 | Workflow | `Disposable VM guest agent smoke` |
-| Branch / commit | `gpt/testing-u009-20260604-5b6c55` / `d1a0cde1502d6f76f3257a18275dba00b25ca64c` |
-| PR / target | `#6` -> `gpt/testing-handoff-tracker-20260604-bf55c1` |
+| Branch / commit | `main` / `e7b00f0553c7b53437f55bda9f02b7c7497f1ddf` |
 | Job | `Host controller and guest agent smoke` |
 | Runner | `HostMachine` |
 | Conclusion | `success` |
-| Artifact | `disposable-vm-guest-agent-smoke`, artifact id `7401596027` |
+| Artifact | `disposable-vm-guest-agent-smoke`, artifact id `7400024008` |
+| Host controller state | `status=success`, `payload_downloaded=true` |
+| Guest | `DESKTOP-QBSO5C3`, Python `3.11.7` |
 | Guest result | `status=completed`, `exit_code=0` |
-| Payload | `mode=inspect_address`, `status=passed` |
-| Key warning | IDA 8.3 normalized requested Unicode symbol name to ASCII fallback; Unicode comments/repeatable comments still round-tripped. |
+| IDA plugin | instance `8052_test1.dll`, port `13338` |
+| Final heartbeat | `api_tests_done`, `status=passed`; cleanup reached `ida_terminate_done` |
 
 该 run 验证：
 
 ```text
-/inspect_address invalid address structured error
-/inspect_address missing address/name structured error
-byte_count=0/negative -> clamp to 1
-byte_count huge -> clamp to 64
-data address readback
-instruction-middle address readback
-high unmapped address returns no symbol/comment/type/disassembly metadata
-name lookup returns the seeded target
-Unicode regular comment readback
-Unicode repeatable comment readback
-Unicode function comment readback
-Unicode repeatable function comment readback
-type text readback
-metadata_after_u009.dirty=false
-metadata_after_u009.apply_changes_mutated=false
+/health
+/metadata
+/functions
+/functions limit=1
+/functions name filter
+/functions offset beyond total
+/decompile
+/decompile invalid address
+/xrefs to
+/xrefs from
+/xrefs invalid direction structured error
+/xrefs invalid kind structured error
+/execute -> HTTP 410 status=rejected
+unknown route -> HTTP 404
 ```
 
-U001、U002、U003、U004、U009 已通过并移入 `TESTED.md`。U005-U008、U010+ 仍保留在 `UNTESTED.md`。
+该 baseline run **没有** 验证：
+
+```text
+worker hard timeout / kill process tree
+worker crash/result-missing/recorder-error matrix
+```
+
+U001 已由 run `26922985347` 验证并移入 `TESTED.md`。U002 已由 run `26923418555` 验证并移入 `TESTED.md`。U003 已由 run `26923830535` 验证并移入 `TESTED.md`。
 
 ## 6. 已测/未测迁移规则
 
@@ -313,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U009 已由 workflow run `26926388631` 通过并移入 `TESTED.md`。现在仍建议从 `UNTESTED.md` 中 U005 多 IDA 实例选择开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。U006 `/functions` 主要 corner-case 语义已由 workflow run `26925694907` 通过并移入 `TESTED.md`；只剩 U006R fixture-dependent residuals。U009 已由 workflow run `26926388631` 通过并移入 `TESTED.md`。U013 已由 workflow run `26926417574` 通过并移入 `TESTED.md`。现在建议从 U006R、U010/U011/U012/U014 apply_changes corner cases、剩余 read-only endpoint corner cases 或 installer/client config coverage 开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -379,6 +361,48 @@ GUI metadata_after_u004.dirty == false
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U004，除非修改了 MCP transport/tool schema/tool result 逻辑。
 
+
+### U005：multi-IDA instance selection（已通过）
+
+Run `26925755930` 已验证：
+
+```text
+复制同目录 test1.dll -> test1_u005_copy.dll
+同时启动两个 IDA GUI/plugin 实例
+list_ida_instances.count == 2
+无 selector 时 multiple-instance rejection
+按 full instance_id 选择 primary/copy
+按唯一 substring 选择 primary/copy
+按 port 选择 copy
+port 优先于冲突 instance_id
+ambiguous substring `test1` 被拒绝
+missing instance_id 被拒绝
+list_functions 返回被选中的 instance_id
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U005，除非修改了 instance registry 或 selector 解析逻辑。
+
+
+
+### U006：`/functions` corner case（主要语义已通过）
+
+Run `26925694907` 已验证：
+
+```text
+ida_api_test_mode=functions_corner
+/functions include_thunks/include_library_functions 2x2 matrix
+/functions segment=.text filter and missing segment
+/functions name_contains case-insensitive probe
+/functions Unicode/special name_contains probe
+/functions numeric string offset/limit and boolean strings
+/functions limit=0/-1/5001/non-int -> structured HTTP 400
+/functions offset=-1/non-int -> structured HTTP 400
+/functions name_contains/segment/boolean flag type errors -> structured HTTP 400
+```
+
+证据已经移入 `TESTED.md`。第一次 run `26925551740` 的断言已经通过但最终 stdout 因 GBK 无法输出 `☃` 而失败；修复经验已经写入 `DISPOSABLE_VM_WORKFLOW_LESSONS.md`。后续不要重复跑 U006 主语义，除非修改了 `/functions` validation/listing 逻辑。仍需新 fixture 才能测 U006R：空数据库、巨大函数数量分页、重复函数名或 demangled 名称。
+
+
 ### U009：/inspect_address 系统测试（已通过）
 
 Run `26926388631` 已验证：
@@ -395,6 +419,26 @@ repeated inspect 后 GUI DB clean
 ```
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U009，除非修改了 `/inspect_address`、comment/type/name readback、或 IDA 地址读取契约。
+
+### U013：patch_bytes complex cases（已通过）
+
+Run `26926417574` 已验证：
+
+```text
+old_bytes mismatch 失败且不 dirty
+unmapped-only patch 失败且不 dirty
+multi-byte patch
+instruction 中间/第二字节 patch
+new_bytes == old_bytes 的 same-byte patch
+同一地址连续 patch 两次
+patch 到 data/import 地址
+partial apply: 前 6 个 patch 生效，最后 unmapped op 失败
+patch 后 inspect_address bytes/disassembly 刷新
+partial destructive apply 后 dirty=true
+dirty 后第二次 destructive apply 被拒绝
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U013，除非修改了 `patch_bytes` replay、`old_bytes_hex` 校验或 partial apply 语义。
 
 ## 8. 失败排查顺序
 
@@ -420,6 +464,6 @@ repeated inspect 后 GUI DB clean
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，直接做 `U005_multi_IDA_instance_selection.py` payload；U009 已完成，不要重复跑。
+4. 如果要推进下一项覆盖，优先选择 U006R、U010/U011/U012/U014 apply_changes corner cases、剩余 read-only endpoint corner cases 或 installer/client config coverage；U009 已完成，不要重复跑。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。

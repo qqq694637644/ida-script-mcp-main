@@ -45,6 +45,9 @@ on:
           - ida_plugin_worker_failure_matrix_test
           - ida_plugin_u004_real_mcp_client_test
           - ida_plugin_u009_inspect_address_test
+          - ida_plugin_u005_multi_ida_instance_test
+          - ida_plugin_u007_decompile_corner_case_test
+          - ida_plugin_u013_patch_bytes_complex_test
         default: noop
       ida_dir:
         description: "Guest IDA Pro directory used for IDA-related tasks"
@@ -66,6 +69,7 @@ on:
           - basic
           - full
           - apply_changes
+          - functions_corner
         default: basic
       command_json:
         description: "JSON command array used when task_action=command"
@@ -192,7 +196,11 @@ jobs:
           if ($taskAction -eq "ida_plugin_api_test") {
             $controllerTaskAction = "python_script"
             $controllerArgs[7] = $controllerTaskAction
-            $scriptPath = Join-Path $resultDir "ida_plugin_api_test_payload.py"
+            $idaApiPayloadName = "ida_plugin_api_test_payload.py"
+            if ($idaApiTestMode -eq "functions_corner") {
+              $idaApiPayloadName = "U006_functions_corner_case.py"
+            }
+            $scriptPath = Join-Path $resultDir $idaApiPayloadName
             py -3 -m ida_script_mcp.payload.ida_api_test `
               --ida-dir $idaDir `
               --dll-path $dllPath `
@@ -259,6 +267,40 @@ jobs:
               --output $scriptPath
             $controllerArgs += @("--script-path", $scriptPath)
           }
+          if ($taskAction -eq "ida_plugin_u005_multi_ida_instance_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U005_multi_IDA_instance_selection.py"
+            py -3 -m ida_script_mcp.payload.ida_u005_multi_ida_instance_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u007_decompile_corner_case_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U007_decompile_corner_case.py"
+            py -3 -m ida_script_mcp.payload.ida_u007_decompile_corner_case_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u013_patch_bytes_complex_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U013_patch_bytes_complex_cases.py"
+            py -3 -m ida_script_mcp.payload.ida_u013_patch_bytes_complex_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+
           if ($taskAction -eq "ida_plugin_u009_inspect_address_test") {
             $controllerTaskAction = "python_script"
             $controllerArgs[7] = $controllerTaskAction

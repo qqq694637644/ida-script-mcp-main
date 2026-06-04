@@ -59,7 +59,11 @@ dirty=true / apply_changes_mutation_flag
 | U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
+| U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U006 `/functions` corner cases | workflow run `26925694907`, artifact `7401369820` | `functions_corner` mode covered segment/name/include/numeric/invalid parameter semantics; fixture-dependent residuals remain |
+| U007 `/decompile` corner case | workflow run `26926171098`, artifact `7401525174` | start/middle/name decompile, no-function/invalid/missing-name structured errors, thunk/import, largest function, Hex-Rays pseudocode path |
 | U009 /inspect_address system test | workflow run `26926388631`, artifact `7401596027` | invalid/missing target, byte_count clamp, data/instruction-middle/unmapped, Unicode comments, repeatable comments, clean read-only state |
+| U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -459,6 +463,342 @@ Notes:
 - The run closed U004 as a real client/transport/tool-result smoke. U001 remains the stronger test for successful worker-generated ChangeSet replay, because isolated worker execution from a separate stdio MCP server process still returns a structured hard-timeout result in this guest environment.
 
 
+## 2026-06-04 U005：multi-IDA instance selection
+
+Evidence:
+
+- Workflow run: `26925755930`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `8146b3c93efd8461e336156f3cb658302184bd2e`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401401506`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u005_multi_ida_instance_test
+ida_timeout_seconds=300
+run_timeout_seconds=1200
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=u005_multi_ida_instance_selection
+payload status=passed
+same-directory copy created: C:\Users\alion\Desktop\test1_u005_copy.dll
+primary instance: 7388_test1.dll, database=test1.dll, port=13338
+copy instance: 2328_test1_u005_copy.dll, database=test1_u005_copy.dll, port=13339
+list_ida_instances.count=2
+no selector rejects with "Multiple IDA instances found. Specify instance_id or port."
+full primary instance_id selects primary port 13338 and dirty=false
+full copy instance_id selects copy port 13339 and dirty=false
+unique primary filename substring `test1.dll` selects primary
+unique copy substring `u005_copy` selects copy
+port selector 13339 selects copy
+port takes precedence over conflicting instance_id and selects copy
+ambiguous selector `test1` is rejected with "matched multiple instance ids"
+missing selector `definitely_missing_u005_instance` is rejected with "not found"
+list_functions by primary id returns functions and instance_id=7388_test1.dll
+list_functions by copy substring returns functions and instance_id=2328_test1_u005_copy.dll
+copied DLL cleanup removed the temporary same-directory copy
+```
+
+Coverage confirmed by this run:
+
+```text
+two IDA GUI processes running concurrently
+same-directory DLL copy used for second database
+instance registry lists multiple live processes
+MCP server tool implementation rejects missing selector when multiple instances exist
+full instance_id selection
+unique substring instance_id selection
+port selection
+port-over-instance_id precedence
+ambiguous substring rejection
+missing instance rejection
+selected instance carries through read-only tool results
+```
+
+Notes:
+
+- U005 payload source is checked in as `src/ida_script_mcp/payload/U005_multi_IDA_instance_selection.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u005_multi_ida_instance_test.py`.
+- This run uses direct server tool-function calls after U004 already verified real MCP transports. U005 focuses on multi-instance selector semantics and live IDA registry behavior.
+
+
+
+
+## 2026-06-04 U006：`/functions` corner case
+
+Evidence:
+
+- Workflow run: `26925694907`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/u006-functions-corner-test-20260604-0b169c` / `231cd63172e974dad0a04b8eb5de036c230549a0`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401369820`
+- Files inspected: `controller_state.json`, `result.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_api_test
+ida_api_test_mode=functions_corner
+ida_timeout_seconds=180
+run_timeout_seconds=300
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest hello hostname=DESKTOP-QBSO5C3
+guest python_version=3.11.7
+guest result status=completed
+guest result exit_code=0
+payload mode=functions_corner
+payload status=passed
+IDA plugin instance=5264_test1.dll
+IDA plugin port=13338
+health.status=ok
+metadata.dirty=false
+functions_page.total=130
+functions_limit_one.returned=1
+functions_offset_beyond_total.returned=0
+functions_offset_beyond_total.functions=[]
+functions include-thunks/library matrix returned lists and respected limit=25
+functions include-thunks/library totals were monotonic
+functions segment=.text filter returned only .text functions
+functions missing segment returned returned=0, functions=[]
+functions name_contains=SUB_ matched case-insensitively
+functions Unicode/special name_contains="\\u2603_unlikely_*[]" returned a valid empty page
+functions numeric string params accepted offset="0", limit="2", include_thunks="false", include_library_functions="true"
+functions limit=0 -> HTTP 400 field=limit error="limit must be >= 1"
+functions limit=-1 -> HTTP 400 field=limit error="limit must be >= 1"
+functions limit=5001 -> HTTP 400 field=limit error="limit must be <= 5000"
+functions limit="not-an-int" -> HTTP 400 field=limit error="limit must be an integer"
+functions offset=-1 -> HTTP 400 field=offset error="offset must be >= 0"
+functions offset="not-an-int" -> HTTP 400 field=offset error="offset must be an integer"
+functions name_contains=123 -> HTTP 400 field=name_contains
+functions segment=123 -> HTTP 400 field=segment
+functions include_thunks="not-bool" -> HTTP 400 field=include_thunks
+functions include_library_functions="not-bool" -> HTTP 400 field=include_library_functions
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+/functions segment filter
+/functions include_thunks=false/true matrix
+/functions include_library_functions=false/true matrix
+/functions name_contains case-insensitive behavior
+/functions name_contains Unicode/special-character input
+/functions numeric string offset/limit and boolean string coercion
+/functions limit lower/upper/type validation
+/functions offset lower/type validation
+/functions name_contains/segment type validation
+/functions boolean flag type validation
+```
+
+Notes:
+
+- First attempt `26925551740` proved all U006 assertions reached `api_tests_done status=passed`, but failed when final result stdout used `ensure_ascii=False` and Windows guest stdout used GBK, which could not encode `☃`. Commit `231cd63172e974dad0a04b8eb5de036c230549a0` fixed payload stdout by ASCII-escaping final/stage JSON while keeping UTF-8 files.
+- This run covers `/functions` boundary semantics on `test1.dll`. Exact fixture-dependent cases still need dedicated binaries/databases: empty database / 0 functions, huge function-count pagination, duplicate function names, and demangled-name fixtures.
+
+## 2026-06-04 U007：`/decompile` corner case
+
+Evidence:
+
+- Workflow run: `26926171098`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit tested: `gpt/u007-decompile-corner-case-20260604-4e30cb` / `4c6b04e495122fdd15c5c5160c601cc6da6ef5d5`
+- Merged to handoff branch by merge commit: `9d1cd213d496a8f742d752aa9a22a38984037ea4`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401525174`
+- Files inspected: `result.json`, workflow run/job status
+
+Inputs:
+
+```text
+task_action=ida_plugin_u007_decompile_corner_case_test
+ida_timeout_seconds=180
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload status=passed
+IDA plugin instance=8564_test1.dll
+IDA plugin port=13338
+primary function=OpenPerformanceData
+primary function size=1099
+/decompile by start address found=true, pseudocode present, disassembly present
+/decompile by middle address found=true and resolves same function
+/decompile by function name found=true and resolves same function
+/decompile missing name returns found=false with structured error
+/decompile invalid address returns found=false with structured error
+/decompile address 0x0 returns found=false with structured no-function error
+/decompile thunk/import-like function RegQueryValueExW found=true, is_thunk=true, pseudocode/disassembly present
+/decompile largest observed function completed within timeout and returned disassembly
+timings recorded for all U007 decompile probes
+```
+
+Coverage confirmed by this run:
+
+```text
+/decompile address at function start
+/decompile address inside function body
+/decompile name query
+/decompile missing-name structured error
+/decompile invalid-address structured error
+/decompile address outside any function structured error
+/decompile thunk/import-like function
+/decompile largest observed function timing path
+Hex-Rays available path returns pseudocode
+read-only /decompile path leaves GUI database dirty=false
+```
+
+Known unobserved branches:
+
+```text
+Hex-Rays unavailable/no-license path was not observed because this guest had Hex-Rays available.
+Per-function Hex-Rays failure while disassembly remains available was not observed in test1.dll.
+Duplicate function-name ambiguity was not force-created in this read-only payload.
+```
+
+Notes:
+
+- U007 payload builder is checked in as `src/ida_script_mcp/payload/ida_u007_decompile_corner_case_test.py`.
+- U007 reuses the existing `ida_api_test` guest payload framework with `test_mode=decompile_corner_case`.
+- This closes the practical `/decompile` read-only corner-case smoke for the current disposable VM + `test1.dll` baseline. The unobserved branches above remain listed in `UNTESTED.md` as environment/data-construction follow-ups.
+
+## 2026-06-04 U013：patch_bytes complex cases
+
+Evidence:
+
+- Workflow run: `26926417574`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `ac7cbab77c933ebb5119b7145a14e7f3307a5d1d`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401627652`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u013_patch_bytes_complex_test
+ida_timeout_seconds=240
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=u013_patch_bytes_complex_cases
+payload status=passed
+IDA plugin instance=4648_test1.dll
+IDA plugin port=13338
+metadata_before.dirty=false
+metadata_before.database_sha256=45982ab9a3d595e6380503c259e51bba2fa1728ca9f7321ac58187ff6ca9dd65
+old_bytes mismatch op returned status=error and did not dirty the database
+unmapped-only patch returned status=error and did not dirty the database
+dry-run complex patch returned status=ok, applied=[], skipped=7, errors=[]
+dry-run left original code bytes unchanged: 488d0dd958000048ff25da300000cccc
+destructive partial apply returned status=partial
+partial apply applied 6 patch_bytes operations
+partial apply error op_id=op-unmapped-partial-stop
+multi-byte code patch changed 488d0dd9 -> b772f226
+middle-byte patch changed byte at target+5 from 00 -> ff
+same-byte patch accepted new_bytes == old_bytes at target+12
+repeat patch applied twice at target+10, ending at da
+data/import patch changed byte at 0x180004000 from ff -> 00
+after partial apply code bytes match expected b772f22658ff0048ff25da300000cccc
+disassembly still refreshes after patch: mov     bh, 72h
+metadata_after_partial.dirty=true
+metadata_after_partial.dirty_state_method=apply_changes_mutation_flag
+second destructive apply rejected when dirty
+```
+
+Coverage confirmed by this run:
+
+```text
+old_bytes_hex validation before patching
+old_bytes mismatch failure without mutation
+multi-byte patch
+patch to middle/second byte of an instruction
+same-byte patch where new_bytes == old_bytes
+repeated patch to the same address in one ChangeSet
+patch to data/import address
+unmapped/invalid patch error path
+partial apply semantics: earlier patch ops remain applied after later error
+post-patch inspect_address bytes and disassembly refresh
+metadata dirty state after destructive partial apply
+second destructive apply rejected while dirty/unsaved
+```
+
+Notes:
+
+- U013 payload source is checked in as `src/ida_script_mcp/payload/U013_patch_bytes_complex_cases.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u013_patch_bytes_complex_test.py`.
+- This test added real GUI replay validation for `old_bytes_hex`; before this, `patch_bytes` did not check the old bytes before writing.
+- The final invalid-address error is reported as an old-bytes mismatch because IDA byte getters return `ff` at the high test address; the key assertion is that the op fails before mutation and partial semantics are preserved.
+
+
 ## 2026-06-04 U009：/inspect_address 系统测试
 
 Evidence:
@@ -498,40 +838,25 @@ payload mode=inspect_address
 payload status=passed
 /inspect_address invalid address -> found=false with parse error
 /inspect_address missing address/name -> found=false with structured error
-byte_count=0 clamps to 1 and reads one byte
-byte_count negative clamps to 1 and reads one byte
-byte_count huge clamps to 64 and returns bounded bytes
+byte_count=0/negative -> clamp to 1 and read one byte
+byte_count huge -> clamp to 64 and return bounded bytes
 data address 0x180004030 resolves and reads bytes
 instruction-middle address 0x180001001 resolves and reads bytes
-unmapped high address 0x4000000000000000 resolves without symbol/comment/type/disassembly metadata
-unmapped high address bytes are treated as no-real-bytes when IDA returns ff fill
-seeded address/name lookup returns matching bytes
-Unicode regular comment round-trips through /inspect_address
-Unicode repeatable comment round-trips through /inspect_address
-Unicode function comment round-trips through /inspect_address
-Unicode repeatable function comment round-trips through /inspect_address
+unmapped high address 0x4000000000000000 has no symbol/comment/type/disassembly metadata
+unmapped high address all-ff bytes are treated as no real mapped bytes
+name lookup returns the seeded target
+Unicode regular/repeatable comments round-trip
+Unicode function/repeatable function comments round-trip
 type text is returned
 metadata_after_u009.dirty=false
 metadata_after_u009.apply_changes_mutated=false
 ```
 
-Coverage confirmed by this run:
-
-```text
-/inspect_address structured error handling
-/inspect_address byte_count boundary behavior
-/inspect_address on code, data, instruction-tail, and high unmapped addresses
-/inspect_address name lookup path
-Unicode comment and repeatable comment readback
-read-only cleanliness after repeated inspect calls
-U009 workflow action and generated payload path
-```
-
 Notes:
 
-- IDA 8.3 did not preserve the requested Unicode symbol name; it normalized it to an ASCII fallback such as `u009_______1780540155`. The test records this as a warning and still verifies Unicode comments and repeatable comments.
-- IDAPython returned `ffffffffffffffff` for the high unmapped address. U009 treats `None` or all-`ff` bytes as no real mapped bytes, while still asserting no name/comment/type/disassembly metadata is present.
-- Earlier U009 attempts failed on Windows console Unicode output and on the unmapped-byte contract; those fixes are recorded in `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
+- IDA 8.3 normalized the requested Unicode symbol name to an ASCII fallback; Unicode comments/repeatable comments still round-trip.
+- IDAPython returned `ffffffffffffffff` for a high unmapped address; U009 asserts no metadata and treats all-`ff` bytes as no real mapped bytes.
+- Earlier U009 attempts and fixes are recorded in `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
 
 ## 移入规则
 
