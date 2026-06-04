@@ -11,11 +11,14 @@ from ida_script_mcp.payload.ida_api_test import (
     DEFAULT_IDA_TIMEOUT_SECONDS,
     build_guest_ida_api_test_script,
 )
-from ida_script_mcp.payload.ida_worker_chain_test import (
-    build_guest_ida_worker_chain_test_script,
-)
 from ida_script_mcp.payload.ida_u004_real_mcp_client_test import (
     build_guest_u004_real_mcp_client_test_script,
+)
+from ida_script_mcp.payload.ida_u008_decompile_corner_case_test import (
+    build_guest_u008_decompile_corner_case_test_script,
+)
+from ida_script_mcp.payload.ida_worker_chain_test import (
+    build_guest_ida_worker_chain_test_script,
 )
 
 
@@ -176,11 +179,30 @@ def test_build_guest_u004_real_mcp_client_script_contains_checked_sources() -> N
     assert "get_xrefs" in script
     assert "execute_idapython" in script
     assert "apply_worker_changes" in script
-    assert '["py", "-3.11", "-m", "pip", "install", "-r", "requirements.txt", "--proxy", PIP_PROXY]' in script
+    expected_pip_command = (
+        '["py", "-3.11", "-m", "pip", "install", "-r", '
+        '"requirements.txt", "--proxy", PIP_PROXY]'
+    )
+    assert expected_pip_command in script
     assert "http://192.168.1.249:10810" in script
     assert "__WORKER_SCRIPT_B64_JSON__" not in script
     assert "__RUNTIME_FILES_B64_JSON__" not in script
     compile(script, "<generated_u004_real_mcp_client_payload>", "exec")
+
+
+def test_build_guest_u008_decompile_corner_case_script_contains_checked_sources() -> None:
+    script = build_guest_u008_decompile_corner_case_test_script()
+
+    assert "U008_DECOMPILE_CORNER_CASES_RESULT=" in script
+    assert "U008_STAGE=" in script
+    assert '"/decompile"' in script
+    assert "decompile_middle_address_start" in script
+    assert "decompile_name_query_start" in script
+    assert "decompile_outside_function_start" in script
+    assert "decompile_thunk_or_library_start" in script
+    assert "U008 leaves GUI database clean" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    compile(script, "<generated_u008_decompile_corner_case_payload>", "exec")
 
 
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
@@ -229,6 +251,18 @@ def test_disposable_vm_workflow_exposes_u004_real_mcp_client_action() -> None:
     assert "ida_plugin_u004_real_mcp_client_test" in workflow
     assert "U004_real_MCP_client_end-to-end.py" in workflow
     assert "ida_script_mcp.payload.ida_u004_real_mcp_client_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u008_decompile_corner_case_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u008_decompile_corner_case_test" in workflow
+    assert "U008_decompile_corner_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u008_decompile_corner_case_test" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
