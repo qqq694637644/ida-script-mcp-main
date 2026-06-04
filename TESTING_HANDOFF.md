@@ -297,6 +297,8 @@ Notes:
 
 U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。U006 `/functions` 主要 corner-case 语义已由 workflow run `26925694907` 通过并移入 `TESTED.md`；只剩 U006R fixture-dependent residuals。U009 已由 workflow run `26926388631` 通过并移入 `TESTED.md`。U011 已由 workflow run `26926598576` 通过并移入 `TESTED.md`。U012 已由 workflow run `26927371932` 通过并移入 `TESTED.md`。U013 已由 workflow run `26926417574` 通过并移入 `TESTED.md`。现在建议从 U006R、U010/U014 apply_changes corner cases、剩余 read-only endpoint corner cases 或 installer/client config coverage 开始。
 
+U010 已经有专用 workflow action / payload，但真实 rename 矩阵未通过，暂时保留在 `UNTESTED.md`。当前阻塞是 disposable guest 中中文符号名仍被 `ida_name.set_name(..., SN_NOCHECK|SN_NOWARN)` sanitize 成下划线；最新复现数据库保留在 `C:\Users\alion\Desktop\ida-script-mcp-u010-kept-i64\20260604-125255\success_matrix_test1.i64`。在 IDA 侧修复进入 disposable guest 路径前，不要把 U010 移入 `TESTED.md`。
+
 ### U001：完整 V2.3 主链路（已通过）
 
 Run `26922985347` 已验证：
