@@ -1,0 +1,243 @@
+# Disposable VM guest agent smoke implementation
+
+This document describes the first host-controller / guest-agent implementation
+for the disposable VM test architecture.
+
+## Repository layout
+
+```text
+src/ida_script_mcp/disposable_vm/
+  host_controller.py        # host-side one-shot FastAPI controller
+
+src/ida_script_mcp/guest_vm/
+  agent.py                  # guest-side client agent
+  required_imports.py       # guest snapshot dependency import check
+  requirements.txt          # guest snapshot pip requirements
+
+src/ida_script_mcp/payload/
+  disposable_vm.py          # shared JSON protocol models
+```
+
+The host remains the only GitHub Actions runner. The guest agent is only a
+client and never registers as a GitHub runner.
+
+## Machine dependency model
+
+Guest VM is the only machine that needs manual dependency preparation before a
+snapshot is taken. HostMachine is not snapshotted, so the host controller checks
+its own host-only runtime imports and installs missing packages before starting.
+
+## HostMachine dependencies
+
+No host-only module needs to be baked into a snapshot. The workflow installs the
+project package itself, then the host controller detects these host runtime
+imports and installs them with pip if missing:
+
+```text
+fastapi>=0.115.0
+uvicorn>=0.30.0
+```
+
+The automatic install can be disabled for debugging with either:
+
+```powershell
+$env:IDA_SCRIPT_MCP_VM_HOST_AUTO_INSTALL = "0"
+```
+
+or:
+
+```powershell
+--no-auto-install-deps
+```
+
+Manual host preinstall remains possible but is not required:
+
+```powershell
+py -3 -m pip install -e ".[disposable-vm-host]"
+```
+
+## Guest VM snapshot dependencies
+
+Install these inside the guest VM Python 3.11.7 environment before taking the
+clean snapshot:
+
+```text
+requests>=2.32.0
+```
+
+Install from the checked-out repository:
+
+```powershell
+py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\requirements.txt
+```
+
+Or install with the package extra:
+
+```powershell
+py -3.11 -m pip install -e ".[disposable-vm-guest]"
+```
+
+Before taking the snapshot, verify the exact imports the guest agent needs:
+
+```powershell
+py -3.11 -m ida_script_mcp.guest_vm.required_imports
+```
+
+The console entry point is also available after package installation:
+
+```powershell
+ida-script-mcp-vm-guest-check-imports
+```
+
+If the guest snapshot cannot install the whole repository package, copy the
+agent plus `src/ida_script_mcp/guest_vm/requirements.txt` into the snapshot and
+install `requests` in that Python 3.11.7 environment.
+
+For the next automation snapshot layer used to open IDA, drive the Windows GUI,
+and call plugin HTTP APIs, install:
+
+```powershell
+py -3.11 -m pip install -r src\ida_script_mcp\guest_vm\automation_requirements.txt
+```
+
+This currently installs:
+
+```text
+requests>=2.32.0
+pywinauto>=0.6.8
+psutil>=5.9.0
+```
+
+`pywinauto` is the primary Windows automation library for IDA GUI/process smoke
+tests. `requests` is used for guest-agent and plugin HTTP API checks. `psutil`
+is used for reliable process discovery and cleanup. Verify the automation
+snapshot imports with:
+
+```powershell
+py -3.11 -m ida_script_mcp.guest_vm.required_automation_imports
+```
+
+The console entry point is also available after package installation:
+
+```powershell
+ida-script-mcp-vm-guest-check-automation-imports
+```
+
+## Host controller example
+
+```powershell
+py -3 -m ida_script_mcp.disposable_vm.host_controller `
+  --bind-host 0.0.0.0 `
+  --port 8766 `
+  --advertise-url http://<host-vmnet-ip>:8766 `
+  --task-action noop `
+  --connect-timeout-seconds 600 `
+  --timeout-seconds 1800 `
+  --result-dir "$env:RUNNER_TEMP\ida-script-mcp-disposable-vm" `
+  --vmware-restore-script C:\Users\alion\Scripts\vmware_restore_test1.py `
+  --vmware-restore-arg=--gui
+```
+
+The controller clears `RUNNER_TRACKING_ID` before invoking the VMware restore
+script so the GitHub runner cleanup does not kill the VMware child process.
+
+## Guest agent example
+
+Inside the Windows guest snapshot with Python 3.11.7:
+
+```powershell
+py -3.11 -m ida_script_mcp.guest_vm.agent `
+  --controller-url http://<host-vmnet-ip>:8766 `
+  --guest-id ida-test-vm
+```
+
+The `--controller-url` value may also be passed as `<host-vmnet-ip>:8766`; the
+agent normalizes a missing scheme to `http://` before calling the host.
+
+For autostart, configure the same command in the snapshot. The agent also reads
+`IDA_SCRIPT_MCP_CONTROLLER_URL`, `IDA_SCRIPT_MCP_GUEST_ID`,
+`IDA_SCRIPT_MCP_GUEST_BOOT_ID`, and `IDA_SCRIPT_MCP_GUEST_WORK_ROOT`.
+
+## Supported phase-1 / phase-2 task actions
+
+`noop` proves connectivity and returns the guest Python version and executable.
+
+`command` executes a list-form command without a shell. If no command is passed,
+the host defaults to:
+
+```json
+["python", "--version"]
+```
+
+A custom command can be supplied as JSON:
+
+```powershell
+--task-action command --command-json '["python", "--version"]'
+```
+
+The workflow exposes the same command support through these inputs:
+
+```text
+task_action=command
+command_json=["python", "--version"]
+```
+
+`python_script` downloads UTF-8 script text, writes it under the guest job
+directory as `payload.py`, and executes it with the guest's current Python
+interpreter.
+
+The workflow exposes phase-3 script payload support through these inputs:
+
+```text
+task_action=python_script
+```
+
+For the Phase 3 smoke path, the workflow writes a built-in UTF-8 script payload
+on HostMachine and passes that file to the host controller with `--script-path`.
+
+`ida_plugin_install` is the first IDA-specific dynamic payload smoke. The host
+builds a standalone guest-side installer from the current repository files and
+sends it through the existing `python_script` payload channel.
+
+```text
+task_action=ida_plugin_install
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+```
+
+The guest verifies the IDA directory, installs `ida_script_mcp.py` plus support
+files into the per-user IDA plugins directory, compiles and hash-checks the
+installed files, performs standalone import validation, and writes
+`ida_script_mcp_install_manifest.json`.
+
+`ida_plugin_api_test` opens a real DLL in IDA and tests the installed plugin's
+actual HTTP endpoints from inside the disposable guest VM.
+
+```text
+task_action=ida_plugin_api_test
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+The host builds a standalone guest payload from the current repository. The
+guest installs the current plugin files, starts IDA with the DLL and an
+IDAPython bootstrap, waits for `ida_auto.auto_wait()`, starts the plugin HTTP
+server, and tests `/health`, `/metadata`, `/functions`, `/decompile`, `/xrefs`,
+GUI `/execute` rejection, and 404 behavior. Workflow lessons are summarized in
+`DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
+
+## Host result files
+
+The host controller writes these files under `--result-dir`:
+
+```text
+controller_state.json
+hello.json
+payload.json
+guest_logs.ndjson
+result.json
+vmware_restore.json
+controller_error.json
+```
+
+Not every file exists for every failure mode. For example, `hello.json` is absent
+when the guest never connects.
