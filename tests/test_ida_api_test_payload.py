@@ -26,6 +26,9 @@ from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
 from ida_script_mcp.payload.ida_u008_xrefs_corner_case_test import (
     build_guest_u008_xrefs_corner_case_test_script,
 )
+from ida_script_mcp.payload.ida_u010_rename_complex_test import (
+    build_guest_u010_rename_complex_test_script,
+)
 from ida_script_mcp.payload.ida_u011_comment_function_comment_test import (
     build_guest_u011_comment_function_comment_test_script,
 )
@@ -350,6 +353,27 @@ def test_build_guest_u008_xrefs_corner_case_script_contains_checked_sources() ->
     compile(script, "<generated_u008_xrefs_corner_case_payload>", "exec")
 
 
+def test_build_guest_u010_rename_complex_script_contains_checked_sources() -> None:
+    script = build_guest_u010_rename_complex_test_script()
+
+    assert "U010_RENAME_COMPLEX_TEST_RESULT=" in script
+    assert "U010_STAGE=" in script
+    assert "duplicate_existing_function_name" in script
+    assert "invalid_name_with_spaces" in script
+    assert "overlong_name" in script
+    assert "mcp_u010_测试_" in script
+    assert "non_function_address" in script
+    assert "import_library_thunk" in script
+    assert "force_duplicate_existing_function_name" in script
+    assert "SN_FORCE" in script
+    assert "SN_NOCHECK" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    assert "__PLUGIN_EXPECTED_SHA256_JSON__" not in script
+    assert "__IDA_DIR_JSON__" not in script
+    assert "__DLL_PATH_JSON__" not in script
+    compile(script, "<generated_u010_rename_complex_payload>", "exec")
+
+
 def test_build_guest_u011_comment_function_comment_script_contains_checked_sources() -> None:
     script = build_guest_u011_comment_function_comment_test_script()
 
@@ -484,6 +508,18 @@ def test_disposable_vm_workflow_exposes_u008_xrefs_corner_case_action() -> None:
     assert "ida_plugin_u008_xrefs_corner_case_test" in workflow
     assert "U008_xrefs_corner_cases.py" in workflow
     assert "ida_script_mcp.payload.ida_u008_xrefs_corner_case_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u010_rename_complex_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u010_rename_complex_test" in workflow
+    assert "U010_rename_complex_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u010_rename_complex_test" in workflow
 
 
 def test_disposable_vm_workflow_exposes_u011_comment_function_comment_action() -> None:
