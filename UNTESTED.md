@@ -6,35 +6,18 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003 和真实 MCP client smoke U004 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
 U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
+U004 real MCP client end-to-end
 ```
 
-下一轮建议从 MCP 层 U004 开始；也可以按风险优先选择 U005 多实例或 apply_changes corner cases。
+下一轮建议从 U005 多 IDA 实例选择开始；也可以按风险优先选择 apply_changes 或 read-only endpoint corner cases。
 
 ## MCP 层未测
-
-- [ ] **U004 真实 MCP client 端到端**
-
-  覆盖：
-
-  ```text
-  ida-script-mcp stdio transport
-  ida-script-mcp http transport
-  真实 MCP tool 调用 list_ida_instances
-  真实 MCP tool 调用 get_ida_database_info
-  真实 MCP tool 调用 list_functions/decompile_function/get_xrefs
-  真实 MCP tool 调用 execute_idapython
-  真实 MCP tool 调用 apply_worker_changes
-  参数 schema
-  instance_id / port 选择
-  错误返回格式
-  MCP client 看到的 tool result
-  ```
 
 - [ ] **U005 多 IDA 实例选择**
 

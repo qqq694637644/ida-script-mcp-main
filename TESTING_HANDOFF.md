@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。现在建议从 `UNTESTED.md` 中 U004 真实 MCP client 端到端开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。现在建议从 `UNTESTED.md` 中 U005 多 IDA 实例选择开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -344,6 +344,23 @@ rejected: GUI dirty 后 execute_idapython 被拒绝且未启动 worker
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U003，除非修改了 worker failure classification 逻辑。
 
+
+### U004：real MCP client end-to-end（已通过）
+
+Run `26925268750` 已验证：
+
+```text
+stdio transport initialize/list_tools/call_tool
+HTTP/SSE transport initialize/list_tools/list_ida_instances
+list_ida_instances/get_ida_database_info/list_functions/decompile_function/get_xrefs
+execute_idapython structured result via real MCP client
+apply_worker_changes dry-run via real MCP client
+schema params wrapper and timeout_seconds visibility
+GUI metadata_after_u004.dirty == false
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U004，除非修改了 MCP transport/tool schema/tool result 逻辑。
+
 ## 8. 失败排查顺序
 
 不要一看到失败就改 payload 或插件。按边界排查：
@@ -368,6 +385,6 @@ rejected: GUI dirty 后 execute_idapython 被拒绝且未启动 worker
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，直接做 `U004_real_MCP_client_end-to-end.py` payload。
+4. 如果要推进下一项覆盖，直接做 `U005_multi_IDA_instance_selection.py` payload。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。

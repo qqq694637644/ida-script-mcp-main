@@ -59,6 +59,7 @@ restore_extra_args_json=[]
 | U001 full V2.3 worker replay chain | Passed | `26922985347`, artifact `7400373325` |
 | U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
+| U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
 
 ### Final full-smoke coverage
 
@@ -172,6 +173,32 @@ artifact=disposable-vm-guest-agent-smoke / 7400695878
 ```
 
 This verifies the main structured failure classifications for isolated worker execution.
+
+Run `26925268750` closed U004, the real MCP client end-to-end smoke:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u004_real_mcp_client
+payload status=passed
+stdio initialize protocolVersion=2025-11-25
+stdio list_tools contains required seven tools
+stdio list_ida_instances count=1
+stdio get_ida_database_info dirty=false and database_sha256 present
+stdio list_functions returns functions
+stdio decompile_function found=true
+stdio get_xrefs returns structured xrefs list
+stdio execute_idapython returns structured timeout/WorkerHardTimeout result
+stdio apply_worker_changes dry-run status=ok applied=[] skipped=1 errors=[]
+HTTP/SSE server starts at 127.0.0.1:8765
+HTTP/SSE receives GET /sse and POST /messages requests
+metadata_after_u004.dirty=false
+artifact=disposable-vm-guest-agent-smoke / 7401236989
+```
+
+This verifies real MCP client transport and tool-result plumbing. Successful worker-generated replay remains covered by U001; U004 intentionally treats `execute_idapython` as a real-client structured-result check.
 
 ## Failure lessons and fixes
 
@@ -453,6 +480,11 @@ dedicated action/mode, not default full smoke
 | `26923418555` | `0f689dc...` | Success | U002 worker hard-timeout/kill-tree passed; artifact `7400538789`. |
 | `26923741508` | `409ced2...` | Failure | U003 payload failed before first matrix case due nested class `script_path` name resolution. |
 | `26923830535` | `fa086d2...` | Success | U003 worker failure-state matrix passed; artifact `7400695878`. |
+| `26924502072` | `7d14f8d...` | Failure | U004 first attempt installed MCP deps through required proxy and started stdio client, but tool args missed FastMCP `params` wrapper. |
+| `26924654174` | `c6a34c0...` | Failure | U004 stdio read tools passed; execute_idapython through separate MCP server process hard-timed out. |
+| `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
+| `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
+| `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
 
 ## Current conclusion
 
@@ -464,12 +496,12 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, and the U003 worker failure-state matrix are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, and U004 real MCP client transport/tool-result flow are now verified separately.
 
-The remaining backlog starts after the core V2.3 worker lifecycle work. Next likely areas are:
+The remaining backlog starts after U004. Next likely areas are:
 
 ```text
-U004 real MCP client end-to-end
 U005 multi-IDA instance selection
 apply_changes/read-only endpoint corner cases
+installer/client config coverage
 ```

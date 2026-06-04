@@ -58,6 +58,7 @@ dirty=true / apply_changes_mutation_flag
 | U001 full V2.3 worker replay chain | workflow run `26922985347`, artifact `7400373325` | `execute_idapython -> worker ChangeSet -> apply_worker_changes dry-run/destructive -> inspect` |
 | U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
+| U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -378,6 +379,83 @@ Notes:
   - `src/ida_script_mcp/payload/worker_recorder_error_user_script.py`
 - Run `26923741508` first failed before any case executed because the nested `ExecuteParams` class referenced `script_path` with a same-name class attribute. Commit `fa086d2a61f318efb7c4e2dc1dd8d8b7784e55e0` fixed that issue.
 - Core V2.3 worker lifecycle tests U001-U003 are now complete.
+
+
+## 2026-06-04 U004：real MCP client end-to-end
+
+Evidence:
+
+- Workflow run: `26925268750`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `2d8d24accc11209f49de07f35d17faa6991e96bd`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401236989`
+- Files inspected: `controller_state.json`, `result.json`, `hello.json`, `vmware_restore.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u004_real_mcp_client_test
+ida_timeout_seconds=240
+run_timeout_seconds=900
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=u004_real_mcp_client
+payload status=passed
+guest python_version=3.11.7
+U004 dependency install uses py -3.11 -m pip install -r requirements.txt --proxy http://192.168.1.249:10810 when MCP deps are missing
+MCP stdio initialize protocolVersion=2025-11-25
+MCP stdio serverInfo.name=ida_script_mcp
+MCP stdio list_tools contains list_ida_instances/get_ida_database_info/list_functions/decompile_function/get_xrefs/execute_idapython/apply_worker_changes
+execute_idapython input schema is wrapped under params and contains timeout_seconds
+list_ida_instances count=1 and sees instance 4732_test1.dll on port 13338
+get_ida_database_info returns dirty=false and database_sha256 is present
+list_functions returns functions and target 0x180001000
+decompile_function returns found=true and pseudocode/disassembly
+get_xrefs returns a structured xrefs list
+execute_idapython returns structured ExecuteResult status=timeout, error.type=WorkerHardTimeout, hard_timeout=true, killed=true
+apply_worker_changes dry_run=true returns status=ok, applied=[], skipped=[comment op], errors=[]
+MCP HTTP/SSE server starts on 127.0.0.1:8765 and receives GET /sse plus POST /messages requests
+HTTP/SSE client list_ida_instances succeeds during payload execution
+metadata_after_u004.dirty=false
+```
+
+Coverage confirmed by this run:
+
+```text
+real MCP stdio transport
+real MCP HTTP/SSE transport
+real MCP client initialize/list_tools/call_tool flow
+real MCP input schema visibility and params wrapper
+real MCP read-only tools against live GUI IDA plugin
+real MCP execute_idapython tool returns structured result to client
+real MCP apply_worker_changes dry-run tool call
+U004 test scripts follow U00x naming convention
+```
+
+Notes:
+
+- U004 payload source is checked in as `src/ida_script_mcp/payload/U004_real_MCP_client_end-to-end.py`.
+- U004 helper worker script is checked in as `src/ida_script_mcp/payload/U004_real_MCP_client_worker_script.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u004_real_mcp_client_test.py`.
+- The run closed U004 as a real client/transport/tool-result smoke. U001 remains the stronger test for successful worker-generated ChangeSet replay, because isolated worker execution from a separate stdio MCP server process still returns a structured hard-timeout result in this guest environment.
 
 ## 移入规则
 
