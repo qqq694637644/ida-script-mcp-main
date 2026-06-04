@@ -11,11 +11,14 @@ from ida_script_mcp.payload.ida_api_test import (
     DEFAULT_IDA_TIMEOUT_SECONDS,
     build_guest_ida_api_test_script,
 )
-from ida_script_mcp.payload.ida_worker_chain_test import (
-    build_guest_ida_worker_chain_test_script,
-)
 from ida_script_mcp.payload.ida_u004_real_mcp_client_test import (
     build_guest_u004_real_mcp_client_test_script,
+)
+from ida_script_mcp.payload.ida_u010_rename_complex_test import (
+    build_guest_u010_rename_complex_test_script,
+)
+from ida_script_mcp.payload.ida_worker_chain_test import (
+    build_guest_ida_worker_chain_test_script,
 )
 
 
@@ -176,11 +179,36 @@ def test_build_guest_u004_real_mcp_client_script_contains_checked_sources() -> N
     assert "get_xrefs" in script
     assert "execute_idapython" in script
     assert "apply_worker_changes" in script
-    assert '["py", "-3.11", "-m", "pip", "install", "-r", "requirements.txt", "--proxy", PIP_PROXY]' in script
+    expected_install_command = (
+        '["py", "-3.11", "-m", "pip", "install", "-r", '
+        '"requirements.txt", "--proxy", PIP_PROXY]'
+    )
+    assert expected_install_command in script
     assert "http://192.168.1.249:10810" in script
     assert "__WORKER_SCRIPT_B64_JSON__" not in script
     assert "__RUNTIME_FILES_B64_JSON__" not in script
     compile(script, "<generated_u004_real_mcp_client_payload>", "exec")
+
+
+def test_build_guest_u010_rename_complex_script_contains_checked_sources() -> None:
+    script = build_guest_u010_rename_complex_test_script()
+
+    assert "U010_RENAME_COMPLEX_TEST_RESULT=" in script
+    assert "U010_STAGE=" in script
+    assert "duplicate_existing_function_name" in script
+    assert "invalid_name_with_spaces" in script
+    assert "overlong_name" in script
+    assert "mcp_u010_测试_" in script
+    assert "non_function_address" in script
+    assert "import_library_thunk" in script
+    assert "force_duplicate_existing_function_name" in script
+    assert "SN_FORCE" in script
+    assert "SN_NOCHECK" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    assert "__PLUGIN_EXPECTED_SHA256_JSON__" not in script
+    assert "__IDA_DIR_JSON__" not in script
+    assert "__DLL_PATH_JSON__" not in script
+    compile(script, "<generated_u010_rename_complex_payload>", "exec")
 
 
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
@@ -229,6 +257,18 @@ def test_disposable_vm_workflow_exposes_u004_real_mcp_client_action() -> None:
     assert "ida_plugin_u004_real_mcp_client_test" in workflow
     assert "U004_real_MCP_client_end-to-end.py" in workflow
     assert "ida_script_mcp.payload.ida_u004_real_mcp_client_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u010_rename_complex_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u010_rename_complex_test" in workflow
+    assert "U010_rename_complex_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u010_rename_complex_test" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
