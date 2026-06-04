@@ -8,6 +8,7 @@ LLMs do not need to synthesize IDAPython for every common workflow.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -17,12 +18,12 @@ import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 try:
-    import idaapi
     import ida_kernwin
+    import idaapi
     import idc
 
     HAS_IDA = True
@@ -30,32 +31,139 @@ except ImportError:
     HAS_IDA = False
 
 try:  # Package import used when this module is imported from ida_script_mcp.
+    from .change_protocol import (
+        ApplyChangesRequest,
+        ApplyChangesResult,
+        OperationApplyResult,
+        fingerprint_from_metadata,
+        fingerprint_matches,
+    )
     from .execution import ScriptExecutor
     from .protocol import ExecuteRequest, ExecuteResult, ExecutionError
 except ImportError:  # pragma: no cover - standalone IDA plugin support-file import.
     plugin_dir = Path(__file__).parent
+    support_dir = plugin_dir / "ida_script_mcp_support"
     if str(plugin_dir) not in sys.path:
         sys.path.insert(0, str(plugin_dir))
+    if str(support_dir) not in sys.path:
+        sys.path.insert(0, str(support_dir))
 
     try:
-        from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
-        from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+        from ida_script_mcp_support.change_protocol import (  # type: ignore[no-redef]
+            ApplyChangesRequest,
+            ApplyChangesResult,
+            OperationApplyResult,
+            fingerprint_from_metadata,
+            fingerprint_matches,
+        )
+        from ida_script_mcp_support.execution import ScriptExecutor  # type: ignore[no-redef]
+        from ida_script_mcp_support.protocol import (  # type: ignore[no-redef]
             ExecuteRequest,
             ExecuteResult,
             ExecutionError,
         )
     except ImportError:
-        from execution import ScriptExecutor  # type: ignore[no-redef]
-        from protocol import ExecuteRequest, ExecuteResult, ExecutionError  # type: ignore[no-redef]
+        try:
+            from ida_script_mcp_change_protocol import (  # type: ignore[no-redef]
+                ApplyChangesRequest,
+                ApplyChangesResult,
+                OperationApplyResult,
+                fingerprint_from_metadata,
+                fingerprint_matches,
+            )
+            from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
+            from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+                ExecuteRequest,
+                ExecuteResult,
+                ExecutionError,
+            )
+        except ImportError:
+            from change_protocol import (  # type: ignore[no-redef]
+                ApplyChangesRequest,
+                ApplyChangesResult,
+                OperationApplyResult,
+                fingerprint_from_metadata,
+                fingerprint_matches,
+            )
+            from execution import ScriptExecutor  # type: ignore[no-redef]
+            from protocol import (  # type: ignore[no-redef]
+                ExecuteRequest,
+                ExecuteResult,
+                ExecutionError,
+            )
 
 PLUGIN_NAME = "IDA-Script-MCP"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13338
 MAX_PORT_RANGE = 100
+MAX_FUNCTIONS_LIMIT = 5000
 MAX_DISASSEMBLY_LINES = 1000
+MAX_XREFS_LIMIT = 5000
+UNSAFE_GUI_EXECUTE_ENV = "IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE"
 
 INSTANCE_INFO_FILE = Path.home() / ".ida_script_mcp_instances.json"
 INSTANCE_LOCK = threading.Lock()
+DATABASE_CHANGE_COUNT_BASELINE: int | None = None
+DATABASE_CHANGE_COUNT_BASELINE_ERROR: str | None = None
+DATABASE_MUTATED_BY_APPLY_CHANGES = False
+
+
+class RequestValidationError(ValueError):
+    """Raised when an HTTP request contains invalid structured parameters."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+
+
+def _coerce_int_param(
+    payload: dict[str, Any],
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    raw_value = payload.get(name, default)
+    if raw_value is None or raw_value == "":
+        raw_value = default
+    if isinstance(raw_value, bool):
+        raise RequestValidationError(name, f"{name} must be an integer")
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise RequestValidationError(name, f"{name} must be an integer") from exc
+    if minimum is not None and value < minimum:
+        raise RequestValidationError(name, f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise RequestValidationError(name, f"{name} must be <= {maximum}")
+    return value
+
+
+def _coerce_bool_param(payload: dict[str, Any], name: str, default: bool) -> bool:
+    raw_value = payload.get(name, default)
+    if raw_value is None or raw_value == "":
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(raw_value, int) and raw_value in (0, 1):
+        return bool(raw_value)
+    raise RequestValidationError(name, f"{name} must be a boolean")
+
+
+def _coerce_optional_str_param(payload: dict[str, Any], name: str) -> str | None:
+    raw_value = payload.get(name)
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, str):
+        raise RequestValidationError(name, f"{name} must be a string")
+    return raw_value
 
 
 def get_instance_id() -> str:
@@ -76,14 +184,14 @@ class InstanceRegistry:
 
     def __init__(self):
         self.instance_id = get_instance_id()
-        self.port: Optional[int] = None
+        self.port: int | None = None
         self.host = DEFAULT_HOST
-        self.database: Optional[str] = None
+        self.database: str | None = None
 
     def _load_instances(self) -> dict[str, Any]:
         try:
             if INSTANCE_INFO_FILE.exists():
-                with open(INSTANCE_INFO_FILE, "r", encoding="utf-8") as handle:
+                with open(INSTANCE_INFO_FILE, encoding="utf-8") as handle:
                     return json.load(handle)
         except Exception:
             pass
@@ -126,7 +234,7 @@ class InstanceRegistry:
         with INSTANCE_LOCK:
             try:
                 if INSTANCE_INFO_FILE.exists():
-                    with open(INSTANCE_INFO_FILE, "r", encoding="utf-8") as handle:
+                    with open(INSTANCE_INFO_FILE, encoding="utf-8") as handle:
                         instances = json.load(handle)
                 else:
                     return {}
@@ -208,8 +316,8 @@ def _source_error_payload(exc: BaseException) -> dict[str, Any]:
 
 
 def execute_python_script(
-    code: Optional[str] = None,
-    script_path: Optional[str] = None,
+    code: str | None = None,
+    script_path: str | None = None,
     capture_output: bool = True,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
@@ -342,7 +450,7 @@ class ExecutionManager:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self.current: Optional[ExecutionRecord] = None
+        self.current: ExecutionRecord | None = None
 
     def run(self, request: ExecuteRequest) -> ExecuteResult:
         if not self._lock.acquire(blocking=False):
@@ -369,7 +477,7 @@ def _badaddr() -> int:
     return int(getattr(idaapi, "BADADDR", 0xFFFFFFFFFFFFFFFF)) if HAS_IDA else -1
 
 
-def _parse_address(value: Any) -> Optional[int]:
+def _parse_address(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -411,7 +519,7 @@ def _symbol_name(ea: int) -> str:
     return ""
 
 
-def _segment_name(ea: int) -> Optional[str]:
+def _segment_name(ea: int) -> str | None:
     try:
         segname = idc.get_segm_name(ea)
         return segname or None
@@ -419,7 +527,9 @@ def _segment_name(ea: int) -> Optional[str]:
         return None
 
 
-def _resolve_target_ea(address: Optional[str] = None, name: Optional[str] = None) -> tuple[Optional[int], Optional[str]]:
+def _resolve_target_ea(
+    address: str | None = None, name: str | None = None
+) -> tuple[int | None, str | None]:
     if address:
         ea = _parse_address(address)
         if ea is None:
@@ -446,7 +556,7 @@ def _resolve_target_ea(address: Optional[str] = None, name: Optional[str] = None
     return None, f"Could not resolve name: {name!r}"
 
 
-def _resolve_function(address: Optional[str] = None, name: Optional[str] = None):
+def _resolve_function(address: str | None = None, name: str | None = None):
     try:
         import ida_funcs
     except Exception as exc:
@@ -462,14 +572,235 @@ def _resolve_function(address: Optional[str] = None, name: Optional[str] = None)
     return func, ea, None
 
 
+def _function_summary(func) -> dict[str, Any]:
+    start_ea = int(getattr(func, "start_ea", 0))
+    end_ea = int(getattr(func, "end_ea", start_ea))
+    flags = int(getattr(func, "flags", 0) or 0)
+    try:
+        import ida_funcs
+    except Exception:
+        ida_funcs = None
+
+    thunk_flag = getattr(ida_funcs, "FUNC_THUNK", 0) if ida_funcs is not None else 0
+    library_flag = getattr(ida_funcs, "FUNC_LIB", 0) if ida_funcs is not None else 0
+    return {
+        "name": _symbol_name(start_ea),
+        "start_ea": start_ea,
+        "end_ea": end_ea,
+        "size": max(0, end_ea - start_ea),
+        "segment": _segment_name(start_ea),
+        "flags": flags,
+        "is_thunk": bool(flags & int(thunk_flag)),
+        "is_library": bool(flags & int(library_flag)),
+    }
+
+
+def _path_from_ida_path_type(path_type_name: str) -> str | None:
+    if not HAS_IDA:
+        return None
+    modules = [idaapi]
+    try:
+        modules.append(__import__("ida_loader"))
+    except Exception:
+        pass
+
+    for module in modules:
+        getter = getattr(module, "get_path", None)
+        path_type = getattr(module, path_type_name, None)
+        if getter is None or path_type is None:
+            continue
+        try:
+            value = getter(path_type)
+        except Exception:
+            continue
+        if value:
+            return str(value)
+    return None
+
+
+def _saved_database_path() -> str | None:
+    """Return the saved IDB/I64 path, never the original input sample path."""
+    if not HAS_IDA:
+        return None
+    for path_type_name in ("PATH_TYPE_IDB", "PATH_TYPE_ID0"):
+        value = _path_from_ida_path_type(path_type_name)
+        if value:
+            return value
+    return None
+
+
+def _input_file_path() -> str | None:
+    if not HAS_IDA:
+        return None
+    try:
+        value = idaapi.get_input_file_path()
+    except Exception:
+        return None
+    return str(value) if value else None
+
+
+def _sha256_file(path: str | None) -> str | None:
+    if not path:
+        return None
+    try:
+        hasher = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
+
+def _file_size(path: str | None) -> int | None:
+    if not path:
+        return None
+    try:
+        return int(os.path.getsize(path))
+    except Exception:
+        return None
+
+
+def _ida_bytes_to_hex(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.hex()
+    text = str(value).strip()
+    return text or None
+
+
+def _input_hash(name: str) -> str | None:
+    if not HAS_IDA:
+        return None
+    for module_name in ("ida_nalt", "ida_loader"):
+        try:
+            module = __import__(module_name)
+        except Exception:
+            continue
+        getter = getattr(module, name, None)
+        if getter is None:
+            continue
+        try:
+            return _ida_bytes_to_hex(getter())
+        except Exception:
+            continue
+    return None
+
+
+def _database_dirty_state() -> tuple[bool | None, str | None]:
+    if not HAS_IDA:
+        return None, "IDA APIs unavailable"
+    if DATABASE_MUTATED_BY_APPLY_CHANGES:
+        return True, None
+    checker = getattr(idaapi, "is_database_modified", None)
+    if checker is not None:
+        try:
+            return bool(checker()), None
+        except Exception as exc:
+            return None, str(exc)
+
+    change_count, change_error = _current_database_change_count()
+    if change_count is None:
+        suffix = f"; {change_error}" if change_error else ""
+        return None, f"idaapi.is_database_modified is unavailable{suffix}"
+    if DATABASE_CHANGE_COUNT_BASELINE is None:
+        suffix = (
+            f"; baseline error: {DATABASE_CHANGE_COUNT_BASELINE_ERROR}"
+            if DATABASE_CHANGE_COUNT_BASELINE_ERROR
+            else ""
+        )
+        return None, f"database change-count baseline is unavailable{suffix}"
+    return change_count != DATABASE_CHANGE_COUNT_BASELINE, None
+
+
+def _current_database_change_count() -> tuple[int | None, str | None]:
+    if not HAS_IDA:
+        return None, "IDA APIs unavailable"
+
+    errors: list[str] = []
+    try:
+        ida_ida = __import__("ida_ida")
+        getter = getattr(ida_ida, "inf_get_database_change_count", None)
+        if getter is not None:
+            return int(getter()), None
+    except Exception as exc:
+        errors.append(f"ida_ida.inf_get_database_change_count failed: {exc}")
+
+    try:
+        inf = idaapi.get_inf_structure()
+        value = getattr(inf, "database_change_count", None)
+        if value is not None:
+            return int(value), None
+    except Exception as exc:
+        errors.append(f"idaapi.get_inf_structure().database_change_count failed: {exc}")
+
+    return None, "; ".join(errors) or "database_change_count is unavailable"
+
+
+def _initialize_database_change_baseline() -> dict[str, Any]:
+    global DATABASE_CHANGE_COUNT_BASELINE, DATABASE_CHANGE_COUNT_BASELINE_ERROR
+
+    change_count, error = _current_database_change_count()
+    DATABASE_CHANGE_COUNT_BASELINE = change_count
+    DATABASE_CHANGE_COUNT_BASELINE_ERROR = error
+    return {
+        "database_change_baseline": change_count,
+        "database_change_baseline_error": error,
+    }
+
+
 def _collect_database_info() -> dict[str, Any]:
+    saved_db_path = _saved_database_path()
+    input_path = _input_file_path()
+    dirty_state, dirty_error = _database_dirty_state()
+    change_count, change_error = _current_database_change_count()
     info: dict[str, Any] = {
         "instance_id": instance_registry.instance_id,
         "port": instance_registry.port,
         "database": None,
-        "database_path": None,
+        "database_path": saved_db_path,
+        "input_file_path": input_path,
         "platform": sys.platform,
+        "dirty": dirty_state,
+        "unsaved": dirty_state,
+        "dirty_state_known": dirty_state is not None,
+        "apply_changes_mutated": DATABASE_MUTATED_BY_APPLY_CHANGES,
+        "dirty_state_method": (
+            "apply_changes_mutation_flag"
+            if DATABASE_MUTATED_BY_APPLY_CHANGES
+            else "idaapi.is_database_modified"
+            if HAS_IDA and getattr(idaapi, "is_database_modified", None) is not None
+            else "database_change_count_baseline"
+            if HAS_IDA
+            else "unavailable"
+        ),
     }
+    if dirty_error:
+        info["dirty_error"] = dirty_error
+    if change_count is not None:
+        info["database_change_count"] = change_count
+    if change_error:
+        info["database_change_count_error"] = change_error
+    if DATABASE_CHANGE_COUNT_BASELINE is not None:
+        info["database_change_baseline"] = DATABASE_CHANGE_COUNT_BASELINE
+    if DATABASE_CHANGE_COUNT_BASELINE_ERROR:
+        info["database_change_baseline_error"] = DATABASE_CHANGE_COUNT_BASELINE_ERROR
+
+    if not saved_db_path:
+        info["database_identity_known"] = False
+        info["database_identity_error"] = "saved IDB/I64 database path is unavailable"
+    else:
+        database_sha256 = _sha256_file(saved_db_path)
+        if not database_sha256:
+            info["database_identity_known"] = False
+            info["database_identity_error"] = (
+                f"failed to compute SHA-256 for saved database: {saved_db_path}"
+            )
+        else:
+            info["database_sha256"] = database_sha256
+            info["database_size"] = _file_size(saved_db_path)
+            info["database_identity_known"] = True
 
     if not HAS_IDA:
         return info
@@ -479,9 +810,11 @@ def _collect_database_info() -> dict[str, Any]:
     except Exception:
         pass
     try:
-        info["database_path"] = idaapi.get_input_file_path()
+        info["root_filename"] = idaapi.get_root_filename()
     except Exception:
         pass
+    info["input_md5"] = _input_hash("retrieve_input_file_md5")
+    info["input_sha256"] = _input_hash("retrieve_input_file_sha256")
     try:
         info["imagebase"] = int(idaapi.get_imagebase())
     except Exception:
@@ -512,59 +845,14 @@ def _collect_database_info() -> dict[str, Any]:
         except Exception:
             pass
 
-        for attr_name in ("min_ea", "max_ea"):
-            try:
-                attr_value = getattr(inf, attr_name)
-                if attr_value is not None:
-                    info[attr_name] = int(attr_value)
-            except Exception:
-                pass
-
-    try:
-        import idautils
-
-        info["function_count"] = sum(1 for _ in idautils.Functions())
-    except Exception:
-        pass
-
-    try:
-        import idautils
-
-        info["segment_count"] = sum(1 for _ in idautils.Segments())
-    except Exception:
-        pass
-
     return info
-
-
-def _function_summary(func) -> dict[str, Any]:
-    start_ea = int(func.start_ea)
-    end_ea = int(func.end_ea)
-    flags = 0
-    try:
-        flags = idc.get_func_flags(start_ea)
-    except Exception:
-        pass
-
-    thunk_mask = int(getattr(idc, "FUNC_THUNK", 0))
-    library_mask = int(getattr(idc, "FUNC_LIB", 0))
-
-    return {
-        "start_ea": start_ea,
-        "end_ea": end_ea,
-        "size": max(0, end_ea - start_ea),
-        "name": _symbol_name(start_ea),
-        "segment": _segment_name(start_ea),
-        "is_thunk": bool(flags & thunk_mask),
-        "is_library": bool(flags & library_mask),
-    }
 
 
 def list_functions_data(
     offset: int = 0,
     limit: int = 200,
-    name_contains: Optional[str] = None,
-    segment: Optional[str] = None,
+    name_contains: str | None = None,
+    segment: str | None = None,
     include_thunks: bool = False,
     include_library_functions: bool = False,
 ) -> dict[str, Any]:
@@ -586,8 +874,8 @@ def list_functions_data(
         return result
 
     try:
-        import idautils
         import ida_funcs
+        import idautils
     except Exception as exc:
         result.update({"error": f"IDA function APIs are unavailable: {exc}", "functions": []})
         return result
@@ -645,7 +933,9 @@ def _render_pseudocode(cfunc) -> str:
     return "\n".join(lines)
 
 
-def _collect_disassembly(func_start_ea: int, max_lines: int = MAX_DISASSEMBLY_LINES) -> tuple[list[dict[str, Any]], bool]:
+def _collect_disassembly(
+    func_start_ea: int, max_lines: int = MAX_DISASSEMBLY_LINES
+) -> tuple[list[dict[str, Any]], bool]:
     try:
         import idautils
     except Exception:
@@ -668,8 +958,8 @@ def _collect_disassembly(func_start_ea: int, max_lines: int = MAX_DISASSEMBLY_LI
 
 
 def decompile_function_data(
-    address: Optional[str] = None,
-    name: Optional[str] = None,
+    address: str | None = None,
+    name: str | None = None,
     include_disassembly: bool = False,
 ) -> dict[str, Any]:
     """Decompile a function or return a structured error."""
@@ -721,7 +1011,7 @@ def decompile_function_data(
     return result
 
 
-def _xref_type_name(xref_type: int) -> Optional[str]:
+def _xref_type_name(xref_type: int) -> str | None:
     try:
         import ida_xref
     except Exception:
@@ -743,12 +1033,36 @@ def _xref_type_name(xref_type: int) -> Optional[str]:
     return mapping.get(xref_type)
 
 
+def _xref_is_flow(xref_type: int) -> bool:
+    try:
+        import ida_xref
+    except Exception:
+        return _xref_type_name(xref_type) == "ordinary_flow"
+    return xref_type == getattr(ida_xref, "fl_F", None)
+
+
+def _normalize_xrefs_limit(value: Any) -> tuple[int, str | None, bool]:
+    if value is None or value == "":
+        return 200, None, False
+    if isinstance(value, bool):
+        return 0, f"Could not parse limit: {value!r}", False
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0, f"Could not parse limit: {value!r}", False
+    if parsed < 0:
+        return parsed, "limit must be greater than or equal to 0.", False
+    if parsed > MAX_XREFS_LIMIT:
+        return MAX_XREFS_LIMIT, None, True
+    return parsed, None, False
+
+
 def get_xrefs_data(
-    address: Optional[str] = None,
-    name: Optional[str] = None,
+    address: str | None = None,
+    name: str | None = None,
     direction: str = "to",
     xref_kind: str = "all",
-    limit: int = 200,
+    limit: Any = 200,
 ) -> dict[str, Any]:
     """Get cross references to or from an address or symbol."""
     result = _collect_database_info()
@@ -771,6 +1085,13 @@ def get_xrefs_data(
     result["direction"] = direction
     result["xref_kind"] = xref_kind
 
+    effective_limit, limit_error, limit_clamped = _normalize_xrefs_limit(limit)
+    result["limit"] = effective_limit
+    result["limit_clamped"] = limit_clamped
+    if limit_error:
+        result.update({"error": limit_error, "returned": 0, "truncated": False, "xrefs": []})
+        return result
+
     try:
         import idautils
     except Exception as exc:
@@ -780,19 +1101,25 @@ def get_xrefs_data(
     if direction not in {"to", "from"}:
         result.update({"error": f"Unsupported direction: {direction!r}", "xrefs": []})
         return result
-    if xref_kind not in {"all", "code", "data"}:
+    if xref_kind not in {"all", "code", "data", "flow"}:
         result.update({"error": f"Unsupported xref_kind: {xref_kind!r}", "xrefs": []})
         return result
 
-    iterable = idautils.XrefsTo(target_ea, 0) if direction == "to" else idautils.XrefsFrom(target_ea, 0)
+    iterable = (
+        idautils.XrefsTo(target_ea, 0) if direction == "to" else idautils.XrefsFrom(target_ea, 0)
+    )
 
     xrefs: list[dict[str, Any]] = []
     truncated = False
     for xref in iterable:
         is_code = bool(getattr(xref, "iscode", 0))
+        xref_type = int(getattr(xref, "type", 0))
+        is_flow = _xref_is_flow(xref_type)
         if xref_kind == "code" and not is_code:
             continue
         if xref_kind == "data" and is_code:
+            continue
+        if xref_kind == "flow" and not is_flow:
             continue
 
         from_ea = int(getattr(xref, "frm", 0))
@@ -802,7 +1129,7 @@ def get_xrefs_data(
         except Exception:
             source_disasm = ""
 
-        if len(xrefs) >= limit:
+        if len(xrefs) >= effective_limit:
             truncated = True
             break
 
@@ -812,9 +1139,10 @@ def get_xrefs_data(
                 "to_ea": to_ea,
                 "from_name": _symbol_name(from_ea),
                 "to_name": _symbol_name(to_ea),
-                "type": int(getattr(xref, "type", 0)),
-                "type_name": _xref_type_name(int(getattr(xref, "type", 0))),
+                "type": xref_type,
+                "type_name": _xref_type_name(xref_type),
                 "is_code": is_code,
+                "is_flow": is_flow,
                 "user": bool(getattr(xref, "user", False)),
                 "source_disassembly": source_disasm,
             }
@@ -830,10 +1158,419 @@ def get_xrefs_data(
     return result
 
 
+def _none_if_empty(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
+def _inspect_name(ea: int) -> str:
+    getter = getattr(idc, "get_name", None)
+    if getter is not None:
+        for args in ((ea,), (ea, 0)):
+            try:
+                name = getter(*args)
+            except TypeError:
+                continue
+            except Exception:
+                break
+            if name:
+                return str(name)
+    return _symbol_name(ea)
+
+
+def _inspect_bytes_hex(ea: int, byte_count: int) -> str | None:
+    getter = getattr(idc, "get_bytes", None)
+    if getter is None:
+        return None
+    try:
+        data = getter(ea, byte_count)
+    except Exception:
+        return None
+    if data is None:
+        return None
+    if isinstance(data, bytes):
+        return data.hex()
+    if isinstance(data, bytearray):
+        return bytes(data).hex()
+    try:
+        return bytes(data).hex()
+    except Exception:
+        return _none_if_empty(data)
+
+
+def _inspect_comment(ea: int, repeatable: bool) -> str | None:
+    try:
+        import ida_bytes
+    except Exception:
+        return None
+    getter = getattr(ida_bytes, "get_cmt", None)
+    if getter is None:
+        return None
+    try:
+        return _none_if_empty(getter(ea, int(repeatable)))
+    except Exception:
+        return None
+
+
+def _inspect_function_comment(ea: int, repeatable: bool) -> str | None:
+    try:
+        import ida_funcs
+    except Exception:
+        return None
+    get_func = getattr(ida_funcs, "get_func", None)
+    get_func_cmt = getattr(ida_funcs, "get_func_cmt", None)
+    if get_func is None or get_func_cmt is None:
+        return None
+    try:
+        func = get_func(ea)
+    except Exception:
+        return None
+    if func is None:
+        return None
+    try:
+        return _none_if_empty(get_func_cmt(func, int(repeatable)))
+    except Exception:
+        return None
+
+
+def _inspect_type(ea: int) -> str | None:
+    for getter_name, args in (("get_type", (ea,)), ("print_type", (ea, 0))):
+        getter = getattr(idc, getter_name, None)
+        if getter is None:
+            continue
+        try:
+            value = getter(*args)
+        except Exception:
+            continue
+        if value:
+            return str(value)
+    return None
+
+
+def _inspect_disassembly(ea: int) -> str:
+    generator = getattr(idc, "generate_disasm_line", None)
+    if generator is None:
+        return ""
+    try:
+        return str(generator(ea, 0) or "")
+    except Exception:
+        return ""
+
+
+def inspect_address_data(
+    address: str | None = None,
+    name: str | None = None,
+    byte_count: int = 16,
+) -> dict[str, Any]:
+    """Read a single address for post-apply validation without enabling /execute."""
+
+    try:
+        requested_byte_count = int(byte_count)
+    except Exception:
+        requested_byte_count = 16
+    requested_byte_count = max(1, min(64, requested_byte_count))
+
+    result = _collect_database_info()
+    result["query"] = {
+        "address": address,
+        "name": name,
+        "byte_count": requested_byte_count,
+    }
+
+    target_ea, error = _resolve_target_ea(address=address, name=name)
+    if error:
+        result.update({"found": False, "error": error})
+        return result
+
+    ea = int(target_ea)
+    result.update(
+        {
+            "found": True,
+            "ea": ea,
+            "name": _inspect_name(ea),
+            "comment": _inspect_comment(ea, repeatable=False),
+            "repeatable_comment": _inspect_comment(ea, repeatable=True),
+            "function_comment": _inspect_function_comment(ea, repeatable=False),
+            "repeatable_function_comment": _inspect_function_comment(ea, repeatable=True),
+            "bytes_hex": _inspect_bytes_hex(ea, requested_byte_count),
+            "type": _inspect_type(ea),
+            "disassembly": _inspect_disassembly(ea),
+        }
+    )
+    return result
+
+
+def _required_gui_api(module_name: str, function_name: str):
+    if not HAS_IDA:
+        raise RuntimeError("IDA runtime is unavailable for GUI change replay")
+    module = __import__(module_name)
+    function = getattr(module, function_name, None)
+    if function is None:
+        raise RuntimeError(f"Required IDAPython API is unavailable: {module_name}.{function_name}")
+    return function
+
+
+def _required_gui_type_api():
+    if not HAS_IDA:
+        raise RuntimeError("IDA runtime is unavailable for GUI change replay")
+    module = __import__("idc")
+    setter = getattr(module, "set_type", None)
+    if setter is None:
+        setter = getattr(module, "SetType", None)
+    if setter is None:
+        raise RuntimeError("Required IDAPython API is unavailable: idc.set_type/idc.SetType")
+    return setter
+
+
+def _apply_type_with_fallback(ea: int, decl: str) -> bool:
+    attempts = []
+    try:
+        setter = _required_gui_type_api()
+    except Exception as exc:
+        attempts.append(str(exc))
+    else:
+        try:
+            ok = setter(ea, decl)
+        except Exception as exc:
+            attempts.append(f"IDC type API raised {type(exc).__name__}: {exc}")
+        else:
+            if ok:
+                return True
+            attempts.append("IDC type API returned failure")
+
+    try:
+        ida_typeinf = __import__("ida_typeinf")
+    except Exception as exc:
+        attempts.append(f"ida_typeinf unavailable: {exc}")
+    else:
+        apply_cdecl = getattr(ida_typeinf, "apply_cdecl", None)
+        if apply_cdecl is None:
+            attempts.append("ida_typeinf.apply_cdecl is unavailable")
+        else:
+            flags = getattr(ida_typeinf, "TINFO_DEFINITE", 0)
+            try:
+                ok = apply_cdecl(None, ea, decl, flags)
+            except Exception as exc:
+                attempts.append(f"ida_typeinf.apply_cdecl raised {type(exc).__name__}: {exc}")
+            else:
+                if ok:
+                    return True
+                attempts.append("ida_typeinf.apply_cdecl returned failure")
+
+    raise RuntimeError("; ".join(attempts) or "IDA type apply APIs returned failure")
+
+
+def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
+    if not HAS_IDA:
+        raise RuntimeError("IDA runtime is unavailable for GUI change replay")
+    module = __import__("ida_bytes")
+    patch_bytes = getattr(module, "patch_bytes", None)
+    patch_byte_candidates = []
+    candidate_modules = [("ida_bytes", module)]
+    try:
+        candidate_modules.append(("idc", __import__("idc")))
+    except Exception:
+        pass
+    for module_name, candidate_module in candidate_modules:
+        patch_byte = getattr(candidate_module, "patch_byte", None)
+        if patch_byte is not None:
+            patch_byte_candidates.append((module_name, patch_byte))
+
+    if patch_bytes is None and not patch_byte_candidates:
+        raise RuntimeError("Required IDAPython API is unavailable: ida_bytes.patch_bytes")
+
+    attempts = []
+    if patch_bytes is not None:
+        try:
+            result = patch_bytes(ea, data)
+        except Exception as exc:
+            attempts.append(f"ida_bytes.patch_bytes raised {type(exc).__name__}: {exc}")
+        else:
+            if result is not False:
+                return True
+            attempts.append("ida_bytes.patch_bytes returned failure")
+
+    def _byte_matches(address: int, value: int) -> bool:
+        try:
+            return int(module.get_byte(address)) == value
+        except Exception:
+            pass
+        try:
+            idc_module = __import__("idc")
+            return int(idc_module.get_wide_byte(address)) == value
+        except Exception:
+            return False
+
+    for module_name, patch_byte in patch_byte_candidates:
+        failed_at: int | None = None
+        for offset, value in enumerate(data):
+            if patch_byte(ea + offset, value) or _byte_matches(ea + offset, value):
+                continue
+            failed_at = offset
+            break
+        if failed_at is None:
+            return True
+        attempts.append(f"{module_name}.patch_byte returned failure at offset {failed_at}")
+
+    raise RuntimeError("; ".join(attempts) or "IDA byte patch APIs returned failure")
+
+
+def _read_current_bytes_hex(ea: int, size: int) -> str | None:
+    if size <= 0:
+        return ""
+    try:
+        import ida_bytes
+
+        getter = getattr(ida_bytes, "get_bytes", None)
+        if getter is not None:
+            data = getter(ea, size)
+            if data is not None:
+                return bytes(data).hex()
+    except Exception:
+        pass
+    try:
+        import idc
+
+        byte_getter = getattr(idc, "get_wide_byte", None)
+        if byte_getter is None:
+            return None
+        return bytes(int(byte_getter(ea + offset)) & 0xFF for offset in range(size)).hex()
+    except Exception:
+        return None
+
+
+def _validate_patch_old_bytes(ea: int, old_bytes_hex: str | None) -> None:
+    if not old_bytes_hex:
+        return
+    try:
+        expected = bytes.fromhex(old_bytes_hex).hex()
+    except ValueError as exc:
+        raise RuntimeError(f"old_bytes_hex is not valid hex: {old_bytes_hex!r}") from exc
+    actual = _read_current_bytes_hex(ea, len(expected) // 2)
+    if actual is None:
+        raise RuntimeError(
+            f"Could not read current bytes for old_bytes check at {hex(int(ea))}"
+        )
+    if actual.lower() != expected.lower():
+        raise RuntimeError(
+            f"old_bytes mismatch at {hex(int(ea))}: expected {expected}, found {actual}"
+        )
+
+
+def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
+    op = operation.op
+    try:
+        if dry_run:
+            return OperationApplyResult(
+                op_id=operation.op_id, op=op, status="skipped", message="dry run"
+            )
+        if op == "rename":
+            set_name = _required_gui_api("ida_name", "set_name")
+            ok = set_name(operation.ea, operation.new_name, operation.flags)
+        elif op == "comment":
+            set_cmt = _required_gui_api("ida_bytes", "set_cmt")
+            ok = set_cmt(operation.ea, operation.text, int(operation.repeatable))
+        elif op == "function_comment":
+            get_func = _required_gui_api("ida_funcs", "get_func")
+            set_func_cmt = _required_gui_api("ida_funcs", "set_func_cmt")
+            func = get_func(operation.ea)
+            if func is None:
+                raise RuntimeError(f"No function found for address {hex(int(operation.ea))}")
+            ok = set_func_cmt(func, operation.text, int(operation.repeatable))
+        elif op == "patch_bytes":
+            _validate_patch_old_bytes(operation.ea, operation.old_bytes_hex)
+            ok = _patch_bytes_with_fallback(operation.ea, bytes.fromhex(operation.new_bytes_hex))
+        elif op == "set_type":
+            ok = _apply_type_with_fallback(operation.ea, operation.decl)
+        else:
+            return OperationApplyResult(
+                op_id=operation.op_id, op=op, status="error", message="unsupported operation"
+            )
+        if not ok:
+            return OperationApplyResult(
+                op_id=operation.op_id, op=op, status="error", message="IDA API returned failure"
+            )
+        return OperationApplyResult(
+            op_id=operation.op_id, op=op, status="applied", message="applied"
+        )
+    except Exception as exc:
+        return OperationApplyResult(op_id=operation.op_id, op=op, status="error", message=str(exc))
+
+
+def apply_changes_request(payload: dict[str, Any]) -> dict[str, Any]:
+    global DATABASE_MUTATED_BY_APPLY_CHANGES
+
+    request = ApplyChangesRequest.model_validate(payload)
+    current_metadata = _collect_database_info()
+    if current_metadata.get("dirty_state_known") is False or current_metadata.get("dirty") is None:
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="database dirty state is unknown; refusing change replay",
+        ).model_dump(mode="json")
+    if current_metadata.get("dirty") or current_metadata.get("unsaved"):
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="database has unsaved changes; save before replaying worker changes",
+        ).model_dump(mode="json")
+    if current_metadata.get("database_identity_known") is False or not current_metadata.get(
+        "database_sha256"
+    ):
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="saved database SHA-256 is unavailable; refusing change replay",
+        ).model_dump(mode="json")
+
+    current_fingerprint = fingerprint_from_metadata(current_metadata)
+    if not fingerprint_matches(request.database_fingerprint, current_fingerprint):
+        return ApplyChangesResult(
+            status="rejected",
+            job_id=request.job_id,
+            dry_run=request.dry_run,
+            message="database fingerprint mismatch",
+        ).model_dump(mode="json")
+
+    applied = []
+    skipped = []
+    errors = []
+    for operation in request.operations:
+        result = _execute_change_operation(operation, dry_run=request.dry_run)
+        if result.status == "applied":
+            applied.append(result)
+        elif result.status == "skipped":
+            skipped.append(result)
+        else:
+            errors.append(result)
+            if not request.dry_run:
+                break
+    status = "ok" if not errors else ("partial" if applied or skipped else "error")
+    if not request.dry_run and applied:
+        DATABASE_MUTATED_BY_APPLY_CHANGES = True
+    return ApplyChangesResult(
+        status=status,
+        job_id=request.job_id,
+        dry_run=request.dry_run,
+        applied=applied,
+        skipped=skipped,
+        errors=errors,
+    ).model_dump(mode="json")
+
+
+def _unsafe_gui_execute_enabled() -> bool:
+    return os.environ.get(UNSAFE_GUI_EXECUTE_ENV) == "1"
+
+
 class IdaScriptHttpHandler(BaseHTTPRequestHandler):
     """HTTP request handler for IDA Script MCP."""
 
-    server: "IdaScriptHttpServer"
+    server: IdaScriptHttpServer
 
     def log_message(self, _format, *_args):
         """Reduce logging noise."""
@@ -848,7 +1585,7 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json_body(self) -> Optional[dict[str, Any]]:
+    def _read_json_body(self) -> dict[str, Any] | None:
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length == 0:
@@ -905,44 +1642,86 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path == "/execute":
+                if not _unsafe_gui_execute_enabled():
+                    self._send_json_response(
+                        410,
+                        {
+                            "status": "rejected",
+                            "error": (
+                                "GUI /execute is disabled by default; "
+                                "use isolated worker execution."
+                            ),
+                        },
+                    )
+                    return
                 try:
                     execute_request = ExecuteRequest.model_validate(request_data)
                 except Exception as exc:
                     self._send_json_response(400, _source_error_payload(exc))
                     return
-
                 try:
                     result = execution_manager.run(execute_request)
                 except ExecutionBusyError as exc:
-                    busy_result = ExecuteResult(
-                        status="busy",
-                        result=None,
-                        stdout="",
-                        stderr="",
-                        error=ExecutionError(
-                            type=type(exc).__name__,
-                            message=str(exc),
-                            traceback=None,
-                        ),
-                        timeout_seconds=execute_request.timeout_seconds,
-                    )
-                    self._send_json_response(409, _execute_result_payload(busy_result))
+                    self._send_json_response(409, {"status": "rejected", "error": str(exc)})
                     return
-
                 self._send_json_response(200, _execute_result_payload(result))
                 return
 
+            if parsed.path == "/apply_changes":
+                try:
+                    result = execute_on_main_thread(apply_changes_request, request_data, write=True)
+                    self._send_json_response(200, result)
+                except Exception as exc:
+                    self._send_json_response(400, {"status": "error", "error": str(exc)})
+                return
+
             if parsed.path == "/functions":
+                try:
+                    offset = _coerce_int_param(request_data, "offset", 0, minimum=0)
+                    limit = _coerce_int_param(
+                        request_data,
+                        "limit",
+                        200,
+                        minimum=1,
+                        maximum=MAX_FUNCTIONS_LIMIT,
+                    )
+                    name_contains = _coerce_optional_str_param(request_data, "name_contains")
+                    segment = _coerce_optional_str_param(request_data, "segment")
+                    include_thunks = _coerce_bool_param(request_data, "include_thunks", False)
+                    include_library_functions = _coerce_bool_param(
+                        request_data, "include_library_functions", False
+                    )
+                except RequestValidationError as exc:
+                    self._send_json_response(
+                        400,
+                        {
+                            "status": "error",
+                            "field": exc.field,
+                            "error": str(exc),
+                            "instance_id": instance_registry.instance_id,
+                            "port": instance_registry.port,
+                        },
+                    )
+                    return
                 result = execute_on_main_thread(
                     list_functions_data,
-                    offset=int(request_data.get("offset", 0) or 0),
-                    limit=int(request_data.get("limit", 200) or 200),
-                    name_contains=request_data.get("name_contains"),
-                    segment=request_data.get("segment"),
-                    include_thunks=bool(request_data.get("include_thunks", False)),
-                    include_library_functions=bool(
-                        request_data.get("include_library_functions", False)
-                    ),
+                    offset=offset,
+                    limit=limit,
+                    name_contains=name_contains,
+                    segment=segment,
+                    include_thunks=include_thunks,
+                    include_library_functions=include_library_functions,
+                    write=False,
+                )
+                self._send_json_response(200, result)
+                return
+
+            if parsed.path == "/inspect_address":
+                result = execute_on_main_thread(
+                    inspect_address_data,
+                    address=request_data.get("address"),
+                    name=request_data.get("name"),
+                    byte_count=request_data.get("byte_count", 16),
                     write=False,
                 )
                 self._send_json_response(200, result)
@@ -966,7 +1745,7 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                     name=request_data.get("name"),
                     direction=str(request_data.get("direction", "to")),
                     xref_kind=str(request_data.get("xref_kind", "all")),
-                    limit=int(request_data.get("limit", 200) or 200),
+                    limit=request_data.get("limit", 200),
                     write=False,
                 )
                 self._send_json_response(200, result)
@@ -997,6 +1776,7 @@ class IdaScriptHttpServer(ThreadingHTTPServer):
 
 
 if HAS_IDA:
+
     class IDAScriptMCPPlugin(idaapi.plugin_t):
         """IDA Pro plugin entry point."""
 
@@ -1008,10 +1788,10 @@ if HAS_IDA:
 
         def init(self):
             print(f"[{PLUGIN_NAME}] Plugin loaded (supports multiple instances)")
-            self.server: Optional[IdaScriptHttpServer] = None
+            self.server: IdaScriptHttpServer | None = None
             self.host = DEFAULT_HOST
             self.port = DEFAULT_PORT
-            self.server_thread: Optional[threading.Thread] = None
+            self.server_thread: threading.Thread | None = None
             return idaapi.PLUGIN_KEEP
 
         def run(self, _arg):
@@ -1029,6 +1809,7 @@ if HAS_IDA:
                     self.server = IdaScriptHttpServer(self.host, port)
                     self.port = port
 
+                    baseline = _initialize_database_change_baseline()
                     instance_registry.register(port)
 
                     self.server_thread = threading.Thread(
@@ -1040,11 +1821,36 @@ if HAS_IDA:
                     print(f"[{PLUGIN_NAME}] Server started at http://{self.host}:{port}")
                     print(f"[{PLUGIN_NAME}] Instance ID: {instance_registry.instance_id}")
                     print(f"[{PLUGIN_NAME}] Database: {instance_registry.database}")
-                    print(f"[{PLUGIN_NAME}] Metadata endpoint: GET http://{self.host}:{port}/metadata")
-                    print(f"[{PLUGIN_NAME}] Functions endpoint: POST http://{self.host}:{port}/functions")
-                    print(f"[{PLUGIN_NAME}] Decompile endpoint: POST http://{self.host}:{port}/decompile")
+                    if baseline.get("database_change_baseline") is None:
+                        print(
+                            f"[{PLUGIN_NAME}] Database change-count baseline unavailable: "
+                            f"{baseline.get('database_change_baseline_error')}"
+                        )
+                    else:
+                        print(
+                            f"[{PLUGIN_NAME}] Database change-count baseline: "
+                            f"{baseline.get('database_change_baseline')}"
+                        )
+                    print(
+                        f"[{PLUGIN_NAME}] Metadata endpoint: GET http://{self.host}:{port}/metadata"
+                    )
+                    print(
+                        f"[{PLUGIN_NAME}] Functions endpoint: POST http://{self.host}:{port}/functions"
+                    )
+                    print(
+                        f"[{PLUGIN_NAME}] Decompile endpoint: POST http://{self.host}:{port}/decompile"
+                    )
                     print(f"[{PLUGIN_NAME}] Xrefs endpoint: POST http://{self.host}:{port}/xrefs")
-                    print(f"[{PLUGIN_NAME}] Execute endpoint: POST http://{self.host}:{port}/execute")
+                    print(
+                        f"[{PLUGIN_NAME}] Inspect address endpoint: POST http://{self.host}:{port}/inspect_address"
+                    )
+                    print(
+                        f"[{PLUGIN_NAME}] Execute endpoint disabled by default; "
+                        "use isolated worker execution"
+                    )
+                    print(
+                        f"[{PLUGIN_NAME}] Apply changes endpoint: POST http://{self.host}:{port}/apply_changes"
+                    )
                     return
                 except OSError as exc:
                     if exc.errno in (48, 98, 10048):
@@ -1052,9 +1858,7 @@ if HAS_IDA:
                     else:
                         raise
 
-            print(
-                f"[{PLUGIN_NAME}] Error: No available port in range {self.port}-{max_port - 1}"
-            )
+            print(f"[{PLUGIN_NAME}] Error: No available port in range {self.port}-{max_port - 1}")
 
         def _stop_server(self):
             if self.server:
@@ -1068,7 +1872,6 @@ if HAS_IDA:
         def term(self):
             self._stop_server()
 
-
-    def PLUGIN_ENTRY():
+    def PLUGIN_ENTRY():  # noqa: N802
         """Plugin entry point for IDA Pro."""
         return IDAScriptMCPPlugin()

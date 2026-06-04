@@ -1,0 +1,387 @@
+name: Disposable VM guest agent smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      controller_url:
+        description: "URL guest can use to reach the host controller"
+        required: false
+        default: "http://192.168.1.249:8766"
+      port:
+        description: "Host controller listen port"
+        required: true
+        default: "8766"
+      restore_script:
+        description: "HostMachine VMware restore script path"
+        required: true
+        default: "C:\\Users\\alion\\Scripts\\vmware_restore_test1.py"
+      restore_gui:
+        description: "Pass --gui to the restore script"
+        required: true
+        type: boolean
+        default: true
+      run_vmware_restore:
+        description: "Run the HostMachine VMware restore script before waiting for guest"
+        required: false
+        type: boolean
+        default: true
+      restore_extra_args_json:
+        description: "Extra JSON array args passed to VMware restore script"
+        required: false
+        default: "[]"
+      task_action:
+        description: "Guest task action"
+        required: true
+        type: choice
+        options:
+          - noop
+          - command
+          - python_script
+          - ida_plugin_install
+          - ida_plugin_api_test
+          - ida_plugin_apply_changes_test
+          - ida_plugin_worker_chain_test
+          - ida_plugin_gui_worker_discovery_test
+          - ida_plugin_worker_timeout_test
+          - ida_plugin_worker_failure_matrix_test
+          - ida_plugin_u004_real_mcp_client_test
+          - ida_plugin_u009_inspect_address_test
+          - ida_plugin_u005_multi_ida_instance_test
+          - ida_plugin_u007_decompile_corner_case_test
+          - ida_plugin_u008_xrefs_corner_case_test
+          - ida_plugin_u010_rename_complex_test
+          - ida_plugin_u011_comment_function_comment_test
+          - ida_plugin_u012_set_type_complex_test
+          - ida_plugin_u013_patch_bytes_complex_test
+        default: noop
+      ida_dir:
+        description: "Guest IDA Pro directory used for IDA-related tasks"
+        required: false
+        default: "C:\\Users\\alion\\Desktop\\IDAPro8.3"
+      dll_path:
+        description: "Guest DLL path used when task_action=ida_plugin_api_test"
+        required: false
+        default: "C:\\Users\\alion\\Desktop\\test1.dll"
+      ida_timeout_seconds:
+        description: "Seconds to wait for IDA API automation payload"
+        required: false
+        default: "180"
+      ida_api_test_mode:
+        description: "IDA API test mode used when task_action=ida_plugin_api_test"
+        required: false
+        type: choice
+        options:
+          - basic
+          - full
+          - apply_changes
+          - functions_corner
+        default: basic
+      command_json:
+        description: "JSON command array used when task_action=command"
+        required: false
+        default: '["python", "--version"]'
+      connect_timeout_seconds:
+        description: "Seconds to wait for guest /hello"
+        required: true
+        default: "600"
+      run_timeout_seconds:
+        description: "Seconds to wait for guest /result"
+        required: true
+        default: "1800"
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-vm-smoke:
+    name: Host controller and guest agent smoke
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install project package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          py -3 -m pip install --disable-pip-version-check -e .
+
+      - name: Run disposable VM guest agent smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $resultDir = Join-Path $env:RUNNER_TEMP "ida-script-mcp-disposable-vm"
+          New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
+
+          $port = "${{ inputs.port }}"
+          if ([string]::IsNullOrWhiteSpace($port)) { $port = "8766" }
+
+          $controllerUrl = "${{ inputs.controller_url }}"
+          if ([string]::IsNullOrWhiteSpace($controllerUrl)) {
+            $controllerUrl = "http://192.168.1.249:$port"
+          }
+          Write-Host "Using controller_url=$controllerUrl"
+
+          $restoreScript = "${{ inputs.restore_script }}"
+          if ([string]::IsNullOrWhiteSpace($restoreScript)) {
+            $restoreScript = "C:\Users\alion\Scripts\vmware_restore_test1.py"
+          }
+          $runVmwareRestore = "${{ inputs.run_vmware_restore }}"
+          if ([string]::IsNullOrWhiteSpace($runVmwareRestore)) { $runVmwareRestore = "true" }
+          $restoreExtraArgsJson = '${{ inputs.restore_extra_args_json }}'
+          if ([string]::IsNullOrWhiteSpace($restoreExtraArgsJson)) { $restoreExtraArgsJson = "[]" }
+          try {
+            $restoreExtraArgs = @($restoreExtraArgsJson | ConvertFrom-Json)
+          } catch {
+            throw "restore_extra_args_json must be a JSON array of strings: $restoreExtraArgsJson"
+          }
+          $taskAction = "${{ inputs.task_action }}"
+          if ([string]::IsNullOrWhiteSpace($taskAction)) { $taskAction = "noop" }
+          $controllerTaskAction = $taskAction
+          $idaDir = "${{ inputs.ida_dir }}"
+          if ([string]::IsNullOrWhiteSpace($idaDir)) { $idaDir = "C:\Users\alion\Desktop\IDAPro8.3" }
+          $dllPath = "${{ inputs.dll_path }}"
+          if ([string]::IsNullOrWhiteSpace($dllPath)) { $dllPath = "C:\Users\alion\Desktop\test1.dll" }
+          $idaTimeout = "${{ inputs.ida_timeout_seconds }}"
+          if ([string]::IsNullOrWhiteSpace($idaTimeout)) { $idaTimeout = "180" }
+          $idaApiTestMode = "${{ inputs.ida_api_test_mode }}"
+          if ([string]::IsNullOrWhiteSpace($idaApiTestMode)) { $idaApiTestMode = "basic" }
+          $commandJson = '${{ inputs.command_json }}'
+          if ([string]::IsNullOrWhiteSpace($commandJson)) { $commandJson = '["python", "--version"]' }
+          $connectTimeout = "${{ inputs.connect_timeout_seconds }}"
+          if ([string]::IsNullOrWhiteSpace($connectTimeout)) { $connectTimeout = "600" }
+          $runTimeout = "${{ inputs.run_timeout_seconds }}"
+          if ([string]::IsNullOrWhiteSpace($runTimeout)) { $runTimeout = "1800" }
+          $restoreGui = "${{ inputs.restore_gui }}"
+          if ([string]::IsNullOrWhiteSpace($restoreGui)) { $restoreGui = "true" }
+
+          $controllerArgs = @(
+            "--bind-host", "0.0.0.0",
+            "--port", $port,
+            "--advertise-url", $controllerUrl,
+            "--task-action", $controllerTaskAction,
+            "--connect-timeout-seconds", $connectTimeout,
+            "--timeout-seconds", $runTimeout,
+            "--result-dir", $resultDir
+          )
+          if ($runVmwareRestore -eq "true") {
+            $controllerArgs += @("--vmware-restore-script", $restoreScript)
+            if ($restoreGui -eq "true") {
+              $controllerArgs += "--vmware-restore-arg=--gui"
+            }
+            foreach ($restoreArg in $restoreExtraArgs) {
+              if (-not [string]::IsNullOrWhiteSpace([string]$restoreArg)) {
+                $controllerArgs += "--vmware-restore-arg=$restoreArg"
+              }
+            }
+          } else {
+            Write-Host "Skipping VMware restore; waiting for an already-running guest agent."
+          }
+          if ($taskAction -eq "command") {
+            $controllerArgs += @("--command-json", $commandJson)
+          }
+          if ($taskAction -eq "python_script") {
+            $scriptPath = Join-Path $resultDir "phase3_payload.py"
+            @(
+              "import platform",
+              "import sys",
+              "print('phase3 script ok python=' + platform.python_version() + ' executable=' + sys.executable)"
+            ) | Set-Content -Path $scriptPath -Encoding UTF8
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_install") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_install_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_plugin_install --ida-dir $idaDir --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_api_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $idaApiPayloadName = "ida_plugin_api_test_payload.py"
+            if ($idaApiTestMode -eq "functions_corner") {
+              $idaApiPayloadName = "U006_functions_corner_case.py"
+            }
+            $scriptPath = Join-Path $resultDir $idaApiPayloadName
+            py -3 -m ida_script_mcp.payload.ida_api_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode $idaApiTestMode `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_apply_changes_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_apply_changes_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_api_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode apply_changes `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_worker_chain_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_worker_chain_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_worker_chain_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_gui_worker_discovery_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_gui_worker_discovery_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_worker_chain_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode gui_worker_discovery `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_worker_timeout_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_worker_timeout_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_worker_chain_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode worker_timeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_worker_failure_matrix_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_worker_failure_matrix_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_worker_chain_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode worker_failure_matrix `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u004_real_mcp_client_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U004_real_MCP_client_end-to-end.py"
+            py -3 -m ida_script_mcp.payload.ida_u004_real_mcp_client_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u005_multi_ida_instance_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U005_multi_IDA_instance_selection.py"
+            py -3 -m ida_script_mcp.payload.ida_u005_multi_ida_instance_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u007_decompile_corner_case_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U007_decompile_corner_case.py"
+            py -3 -m ida_script_mcp.payload.ida_u007_decompile_corner_case_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u008_xrefs_corner_case_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U008_xrefs_corner_cases.py"
+            py -3 -m ida_script_mcp.payload.ida_u008_xrefs_corner_case_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u010_rename_complex_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U010_rename_complex_cases.py"
+            py -3 -m ida_script_mcp.payload.ida_u010_rename_complex_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u011_comment_function_comment_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U011_comment_function_comment_complex.py"
+            py -3 -m ida_script_mcp.payload.ida_u011_comment_function_comment_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u013_patch_bytes_complex_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U013_patch_bytes_complex_cases.py"
+            py -3 -m ida_script_mcp.payload.ida_u013_patch_bytes_complex_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u012_set_type_complex_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U012_set_type_complex.py"
+            py -3 -m ida_script_mcp.payload.ida_worker_chain_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode u012_set_type_complex `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+
+          if ($taskAction -eq "ida_plugin_u009_inspect_address_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U009_inspect_address_system_test.py"
+            py -3 -m ida_script_mcp.payload.ida_api_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --test-mode inspect_address `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+
+          py -3 -m ida_script_mcp.disposable_vm.host_controller @controllerArgs
+
+      - name: Upload disposable VM smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: disposable-vm-guest-agent-smoke
+          path: ${{ runner.temp }}\ida-script-mcp-disposable-vm
+          if-no-files-found: warn

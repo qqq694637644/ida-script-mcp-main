@@ -10,7 +10,7 @@ import traceback
 from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
-from typing import Any, Optional
+from typing import Any
 
 try:  # Package import used by the MCP server and normal test runs.
     from .protocol import EXECUTE_FILENAME, ExecuteRequest, ExecuteResult, ExecutionError
@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover - IDA plugin support-file import fallbac
         )
 
 
-class ScriptExecutionTimeout(TimeoutError):
+class ScriptExecutionTimeout(TimeoutError):  # noqa: N818
     """Raised when Python bytecode execution exceeds its deadline."""
 
     def __init__(self, timeout_seconds: int):
@@ -51,9 +51,9 @@ class DeadlineTracer:
         self.timeout_seconds = timeout_seconds
         self.deadline = clock() + timeout_seconds
         self._clock = clock
-        self.previous_trace: Optional[Callable[..., Any]] = None
+        self.previous_trace: Callable[..., Any] | None = None
 
-    def __enter__(self) -> "DeadlineTracer":
+    def __enter__(self) -> DeadlineTracer:
         self.previous_trace = sys.gettrace()
         sys.settrace(self._trace)
         return self
@@ -81,8 +81,7 @@ def _make_jsonable(value: Any, depth: int = 0) -> Any:
         return str(value)
     if isinstance(value, dict):
         return {
-            str(key): _make_jsonable(inner_value, depth + 1)
-            for key, inner_value in value.items()
+            str(key): _make_jsonable(inner_value, depth + 1) for key, inner_value in value.items()
         }
     if isinstance(value, (list, tuple, set)):
         return [_make_jsonable(item, depth + 1) for item in value]
@@ -206,10 +205,10 @@ class ScriptExecutor:
         request: ExecuteRequest,
         start_time: float,
         exc: BaseException,
-        traceback_text: Optional[str],
+        traceback_text: str | None,
         *,
-        stdout_capture: Optional[io.StringIO] = None,
-        stderr_capture: Optional[io.StringIO] = None,
+        stdout_capture: io.StringIO | None = None,
+        stderr_capture: io.StringIO | None = None,
     ) -> ExecuteResult:
         return ExecuteResult(
             status=status,  # type: ignore[arg-type]
