@@ -486,6 +486,17 @@ def _assert_tool_payload(result: dict, key: str, payload: dict) -> None:
     _check(result, f"MCP tool {key} did not return tool error", payload.get("error") is not True, payload)
 
 
+def _schema_contains_property(schema: object, property_name: str) -> bool:
+    if isinstance(schema, dict):
+        properties = schema.get("properties")
+        if isinstance(properties, dict) and property_name in properties:
+            return True
+        return any(_schema_contains_property(value, property_name) for value in schema.values())
+    if isinstance(schema, list):
+        return any(_schema_contains_property(value, property_name) for value in schema)
+    return False
+
+
 async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Path, worker_script: Path, result: dict) -> None:
     from mcp.client.session import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -545,7 +556,8 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
 
             execute_schema = _schema_for("execute_idapython")
             _check(result, "stdio execute_idapython schema has properties", bool(execute_schema.get("properties")), execute_schema)
-            _check(result, "stdio execute_idapython schema includes timeout_seconds", "timeout_seconds" in execute_schema.get("properties", {}), execute_schema)
+            _check(result, "stdio execute_idapython schema wraps params", "params" in execute_schema.get("properties", {}), execute_schema)
+            _check(result, "stdio execute_idapython schema includes timeout_seconds", _schema_contains_property(execute_schema, "timeout_seconds"), execute_schema)
 
             instances_call = await session.call_tool("list_ida_instances", {})
             _check(result, "stdio list_ida_instances not error", not _tool_is_error(instances_call), _model_dump(instances_call))
@@ -554,7 +566,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             _assert_tool_payload(result, "list_ida_instances", instances)
             _check(result, "stdio list_ida_instances sees IDA", int(instances.get("count", 0)) >= 1, instances)
 
-            db_call = await session.call_tool("get_ida_database_info", {"port": int(ready["port"])})
+            db_call = await session.call_tool("get_ida_database_info", {"params": {"port": int(ready["port"])}})
             _check(result, "stdio get_ida_database_info not error", not _tool_is_error(db_call), _model_dump(db_call))
             db_info = _tool_payload(db_call)
             observed["tool_results"]["get_ida_database_info"] = db_info
@@ -564,7 +576,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
 
             functions_call = await session.call_tool(
                 "list_functions",
-                {"port": int(ready["port"]), "offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True},
+                {"params": {"port": int(ready["port"]), "offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True}},
             )
             _check(result, "stdio list_functions not error", not _tool_is_error(functions_call), _model_dump(functions_call))
             functions = _tool_payload(functions_call)
@@ -575,7 +587,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
 
             decompile_call = await session.call_tool(
                 "decompile_function",
-                {"port": int(ready["port"]), "address": target_hex, "include_disassembly": True},
+                {"params": {"port": int(ready["port"]), "address": target_hex, "include_disassembly": True}},
             )
             _check(result, "stdio decompile_function not error", not _tool_is_error(decompile_call), _model_dump(decompile_call))
             decompile = _tool_payload(decompile_call)
@@ -585,7 +597,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
 
             xrefs_call = await session.call_tool(
                 "get_xrefs",
-                {"port": int(ready["port"]), "address": target_hex, "direction": "to", "xref_kind": "all", "limit": 20},
+                {"params": {"port": int(ready["port"]), "address": target_hex, "direction": "to", "xref_kind": "all", "limit": 20}},
             )
             _check(result, "stdio get_xrefs not error", not _tool_is_error(xrefs_call), _model_dump(xrefs_call))
             xrefs = _tool_payload(xrefs_call)
@@ -596,11 +608,13 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             execute_call = await session.call_tool(
                 "execute_idapython",
                 {
-                    "port": int(ready["port"]),
-                    "script_path": str(worker_script),
-                    "capture_output": True,
-                    "timeout_seconds": 90,
-                    "collect_changes": True,
+                    "params": {
+                        "port": int(ready["port"]),
+                        "script_path": str(worker_script),
+                        "capture_output": True,
+                        "timeout_seconds": 90,
+                        "collect_changes": True,
+                    }
                 },
             )
             _check(result, "stdio execute_idapython not MCP error", not _tool_is_error(execute_call), _model_dump(execute_call))
@@ -622,7 +636,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             dry_payload = json.loads(json.dumps(change_set))
             dry_payload["dry_run"] = True
             dry_payload["port"] = int(ready["port"])
-            apply_call = await session.call_tool("apply_worker_changes", dry_payload)
+            apply_call = await session.call_tool("apply_worker_changes", {"params": dry_payload})
             _check(result, "stdio apply_worker_changes not MCP error", not _tool_is_error(apply_call), _model_dump(apply_call))
             apply_dry = _tool_payload(apply_call)
             observed["tool_results"]["apply_worker_changes"] = apply_dry
