@@ -249,6 +249,24 @@ def test_build_guest_ida_worker_failure_matrix_script_contains_checked_sources()
     compile(script, "<generated_worker_failure_matrix_payload>", "exec")
 
 
+def test_build_guest_gui_worker_discovery_script_contains_checked_sources() -> None:
+    script = build_guest_ida_worker_chain_test_script(test_mode="gui_worker_discovery")
+
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in script
+    assert "WORKER_CHAIN_STAGE=" in script
+    assert 'TEST_MODE = "gui_worker_discovery"' in script
+    assert "gui_worker_discovery_execute_start" in script
+    assert "gui_worker_discovery_env" in script
+    assert "gui_executable_path" in script
+    assert "idat64.exe" in script
+    assert "IDA_SCRIPT_MCP_IDA_PATH" in script
+    assert "os.environ.pop(\"IDA_SCRIPT_MCP_IDA_PATH\", None)" in script
+    assert "__TEST_MODE_JSON__" not in script
+    assert "__USER_SCRIPT_FILENAME_JSON__" not in script
+    assert "__USER_SCRIPT_B64_JSON__" not in script
+    compile(script, "<generated_gui_worker_discovery_payload>", "exec")
+
+
 def test_build_guest_u012_set_type_complex_script_contains_checked_sources() -> None:
     script = build_guest_ida_worker_chain_test_script(test_mode="u012_set_type_complex")
 
@@ -426,6 +444,19 @@ def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
 
     assert "ida_plugin_worker_chain_test" in workflow
     assert "ida_plugin_worker_chain_test_payload.py" in workflow
+    assert "ida_script_mcp.payload.ida_worker_chain_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_gui_worker_discovery_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_gui_worker_discovery_test" in workflow
+    assert "ida_plugin_gui_worker_discovery_test_payload.py" in workflow
+    assert "--test-mode gui_worker_discovery" in workflow
     assert "ida_script_mcp.payload.ida_worker_chain_test" in workflow
 
 
