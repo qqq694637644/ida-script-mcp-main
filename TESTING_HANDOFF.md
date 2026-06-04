@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。现在建议从 `UNTESTED.md` 中 U005 多 IDA 实例选择开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U011 已由 workflow run `26926404836` 通过并移入 `TESTED.md`。如果按 backlog 原始顺序补齐，仍从 U005 多 IDA 实例选择开始；如果接着本次 comment/function_comment 链路推进，下一项是 U012 `set_type` 复杂情况。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -361,6 +361,24 @@ GUI metadata_after_u004.dirty == false
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U004，除非修改了 MCP transport/tool schema/tool result 逻辑。
 
+### U011：comment / function_comment 复杂情况（已通过）
+
+Run `26926404836` 已验证：
+
+```text
+comment repeatable=true
+comment clear via empty string
+long comment exact persistence at 993 characters
+Unicode comment with CJK/Japanese/Cyrillic/Arabic/lambda/emoji
+function_comment and repeatable_function_comment on normal functions
+function_comment on non-function address returns structured error
+regular comment on thunk/library function
+same-address comment overwrite keeps the second value
+dry-run leaves database clean; destructive apply sets dirty/apply_changes_mutated
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U011，除非修改了 `/apply_changes` 的 `comment`/`function_comment` 行为，或要专门扩展 >1 KiB comment 边界。
+
 ## 8. 失败排查顺序
 
 不要一看到失败就改 payload 或插件。按边界排查：
@@ -385,6 +403,6 @@ GUI metadata_after_u004.dirty == false
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，直接做 `U005_multi_IDA_instance_selection.py` payload。
+4. 如果要按原始 backlog 顺序推进，直接做 `U005_multi_IDA_instance_selection.py` payload；如果接着 U011 的变更回放覆盖推进，做 U012 `set_type` payload。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。

@@ -59,6 +59,7 @@ dirty=true / apply_changes_mutation_flag
 | U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
+| U011 comment / function_comment complex | workflow run `26926404836`, artifact `7401605657` | repeatable/clear/long/Unicode comments, function comments, non-function error, thunk/library comment, overwrite order |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -456,6 +457,83 @@ Notes:
 - U004 helper worker script is checked in as `src/ida_script_mcp/payload/U004_real_MCP_client_worker_script.py`.
 - The builder is `src/ida_script_mcp/payload/ida_u004_real_mcp_client_test.py`.
 - The run closed U004 as a real client/transport/tool-result smoke. U001 remains the stronger test for successful worker-generated ChangeSet replay, because isolated worker execution from a separate stdio MCP server process still returns a structured hard-timeout result in this guest environment.
+
+## 2026-06-04 U011：comment / function_comment 复杂情况
+
+Evidence:
+
+- Workflow run: `26926404836`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/test-u011-20260604-53f9f2` / `676c7988a5638ca229ed35e56644fb6561bb3fd4`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401605657`
+- Files inspected: `result.json` containing host result and `U011_COMMENT_FUNCTION_COMMENT_TEST_RESULT` stdout marker
+
+Inputs:
+
+```text
+task_action=ida_plugin_u011_comment_function_comment_test
+ida_timeout_seconds=180
+run_timeout_seconds=1800
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u011_comment_function_comment_complex
+payload status=passed
+dry-run status=ok, applied=[], errors=[], skipped contains all 11 operations
+metadata_after_dry_run.dirty=false
+destructive apply status=partial
+destructive apply applied the 10 expected operations before the expected error
+expected error op-function-comment-non-function: No function found for address 0x7fffffffffff
+repeatable regular comment verified at 0x180001000
+cleared regular comment verified as null at 0x180001010
+long comment exact length=993 verified at 0x1800010c0, with expected prefix/suffix
+Unicode regular comment verified at 0x180001510
+function_comment verified at 0x180001760
+repeatable_function_comment verified at 0x1800017e0
+thunk/library regular comment verified on RegQueryValueExW at 0x180001bbe
+same-address overwrite verified final comment is the second value at 0x1800019b0
+metadata_after_apply.dirty=true
+metadata_after_apply.apply_changes_mutated=true
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+comment repeatable=true
+comment clear via empty string
+long comment exact persistence within the verified 993-character range
+Unicode comment with CJK/Japanese/Cyrillic/Arabic/lambda/emoji
+function_comment on a normal function
+repeatable function_comment on a normal function
+function_comment on a non-function address error path
+regular comment on a thunk/library function
+same-address repeated comment overwrite order
+dry-run versus destructive /apply_changes behavior for comment operations
+```
+
+Notes:
+
+- U011 payload source is checked in as `src/ida_script_mcp/payload/U011_comment_function_comment_complex.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u011_comment_function_comment_test.py`.
+- The workflow action is `ida_plugin_u011_comment_function_comment_test`.
+- The destructive part operates on a temporary `test1.i64` created with IDA `-o...` inside the guest temp directory; it does not patch the original `C:\Users\alion\Desktop\test1.dll`.
+- This run verifies exact long-comment persistence for 993 characters. Comments beyond roughly 1 KiB remain a separate boundary test if needed.
 
 ## 移入规则
 

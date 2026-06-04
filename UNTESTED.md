@@ -105,18 +105,6 @@ U004 real MCP client end-to-end
   flags 不同组合
   ```
 
-- [ ] **U011 comment / function_comment 复杂情况**
-
-  ```text
-  repeatable=true
-  清空 comment
-  超长 comment
-  Unicode comment
-  对非函数地址设置 function_comment
-  对 thunk/library function 设置 comment
-  同一地址重复覆盖 comment
-  ```
-
 - [ ] **U012 set_type 复杂情况**
 
   ```text

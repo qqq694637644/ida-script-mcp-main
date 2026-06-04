@@ -460,6 +460,27 @@ assertions on dirty state and database identity
 dedicated action/mode, not default full smoke
 ```
 
+### Console markers must be ASCII and bounded
+
+Observed during U011:
+
+```text
+Run 26926069955: U011 reached destructive apply, but final stdout failed under the guest GBK console when the JSON marker contained Arabic/emoji text.
+Run 26926193824: ensure_ascii=True avoided the encoding crash, but printing full endpoint responses made result.json stdout_tail start inside a huge response body and hid the useful failure context.
+Run 26926404836: compact console result plus bounded long-comment assertion passed.
+```
+
+Fix:
+
+- Use `json.dumps(..., ensure_ascii=True)` for stdout/stderr markers from guest payloads that contain Unicode.
+- Keep full UTF-8 JSON files for local debugging when useful, but print a compact marker to stdout with `failed_check`, clipped strings/lists, and selected response summaries.
+- For long comment coverage, keep the default assertion within the known reliable range unless the test is explicitly about IDA's maximum comment length.
+
+Rule:
+
+- Artifact `result.json` usually only exposes the guest process stdout/stderr tail. Do not rely on huge final JSON blobs for diagnostics.
+- Every destructive payload should print a bounded, machine-readable final marker that still includes the failed assertion.
+
 ## Run index
 
 | Run | Commit | Result | Note |
@@ -485,6 +506,9 @@ dedicated action/mode, not default full smoke
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26926069955` | `5a7272f...` | Failure | U011 core apply path reached expected partial apply, but Unicode final JSON crashed on the guest GBK stdout. |
+| `26926193824` | `8c1f617...` | Failure | U011 avoided the encoding crash, but full stdout JSON hid the failed assertion behind large response bodies. |
+| `26926404836` | `676c798...` | Success | U011 comment/function_comment complex passed; artifact `7401605657`. |
 
 ## Current conclusion
 
@@ -496,12 +520,13 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, and U004 real MCP client transport/tool-result flow are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, and U011 comment/function_comment complex behavior are now verified separately.
 
-The remaining backlog starts after U004. Next likely areas are:
+The original sequential backlog still has U005-U010 open, and U011 is now closed. Next likely areas are:
 
 ```text
 U005 multi-IDA instance selection
+U012 set_type complex cases if continuing the apply_changes operation coverage thread
 apply_changes/read-only endpoint corner cases
 installer/client config coverage
 ```
