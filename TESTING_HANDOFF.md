@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U006 `/functions` 主要 corner-case 语义已由 workflow run `26925694907` 通过并移入 `TESTED.md`；只剩 U006R fixture-dependent residuals。现在建议从 `UNTESTED.md` 中 U004 真实 MCP client 端到端、U005 多实例选择，或 U007 `/decompile` corner case 开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。U006 `/functions` 主要 corner-case 语义已由 workflow run `26925694907` 通过并移入 `TESTED.md`；只剩 U006R fixture-dependent residuals。U013 已由 workflow run `26926417574` 通过并移入 `TESTED.md`。现在建议从 U006R、U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage 开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -344,6 +344,46 @@ rejected: GUI dirty 后 execute_idapython 被拒绝且未启动 worker
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U003，除非修改了 worker failure classification 逻辑。
 
+
+### U004：real MCP client end-to-end（已通过）
+
+Run `26925268750` 已验证：
+
+```text
+stdio transport initialize/list_tools/call_tool
+HTTP/SSE transport initialize/list_tools/list_ida_instances
+list_ida_instances/get_ida_database_info/list_functions/decompile_function/get_xrefs
+execute_idapython structured result via real MCP client
+apply_worker_changes dry-run via real MCP client
+schema params wrapper and timeout_seconds visibility
+GUI metadata_after_u004.dirty == false
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U004，除非修改了 MCP transport/tool schema/tool result 逻辑。
+
+
+### U005：multi-IDA instance selection（已通过）
+
+Run `26925755930` 已验证：
+
+```text
+复制同目录 test1.dll -> test1_u005_copy.dll
+同时启动两个 IDA GUI/plugin 实例
+list_ida_instances.count == 2
+无 selector 时 multiple-instance rejection
+按 full instance_id 选择 primary/copy
+按唯一 substring 选择 primary/copy
+按 port 选择 copy
+port 优先于冲突 instance_id
+ambiguous substring `test1` 被拒绝
+missing instance_id 被拒绝
+list_functions 返回被选中的 instance_id
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U005，除非修改了 instance registry 或 selector 解析逻辑。
+
+
+
 ### U006：`/functions` corner case（主要语义已通过）
 
 Run `26925694907` 已验证：
@@ -361,6 +401,26 @@ ida_api_test_mode=functions_corner
 ```
 
 证据已经移入 `TESTED.md`。第一次 run `26925551740` 的断言已经通过但最终 stdout 因 GBK 无法输出 `☃` 而失败；修复经验已经写入 `DISPOSABLE_VM_WORKFLOW_LESSONS.md`。后续不要重复跑 U006 主语义，除非修改了 `/functions` validation/listing 逻辑。仍需新 fixture 才能测 U006R：空数据库、巨大函数数量分页、重复函数名或 demangled 名称。
+
+### U013：patch_bytes complex cases（已通过）
+
+Run `26926417574` 已验证：
+
+```text
+old_bytes mismatch 失败且不 dirty
+unmapped-only patch 失败且不 dirty
+multi-byte patch
+instruction 中间/第二字节 patch
+new_bytes == old_bytes 的 same-byte patch
+同一地址连续 patch 两次
+patch 到 data/import 地址
+partial apply: 前 6 个 patch 生效，最后 unmapped op 失败
+patch 后 inspect_address bytes/disassembly 刷新
+partial destructive apply 后 dirty=true
+dirty 后第二次 destructive apply 被拒绝
+```
+
+证据已经移入 `TESTED.md`。后续不要重复跑 U013，除非修改了 `patch_bytes` replay、`old_bytes_hex` 校验或 partial apply 语义。
 
 ## 8. 失败排查顺序
 
@@ -386,6 +446,6 @@ ida_api_test_mode=functions_corner
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，直接做 `U004_real_MCP_client_end-to-end.py` payload。
+4. 如果要推进下一项覆盖，优先选择 U006R、U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。

@@ -59,7 +59,10 @@ restore_extra_args_json=[]
 | U001 full V2.3 worker replay chain | Passed | `26922985347`, artifact `7400373325` |
 | U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
+| U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
+| U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
 | U006 `/functions` corner cases | Passed | `26925694907`, artifact `7401369820` |
+| U013 patch_bytes complex cases | Passed | `26926417574`, artifact `7401627652` |
 
 ### Final full-smoke coverage
 
@@ -174,6 +177,59 @@ artifact=disposable-vm-guest-agent-smoke / 7400695878
 
 This verifies the main structured failure classifications for isolated worker execution.
 
+Run `26925268750` closed U004, the real MCP client end-to-end smoke:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u004_real_mcp_client
+payload status=passed
+stdio initialize protocolVersion=2025-11-25
+stdio list_tools contains required seven tools
+stdio list_ida_instances count=1
+stdio get_ida_database_info dirty=false and database_sha256 present
+stdio list_functions returns functions
+stdio decompile_function found=true
+stdio get_xrefs returns structured xrefs list
+stdio execute_idapython returns structured timeout/WorkerHardTimeout result
+stdio apply_worker_changes dry-run status=ok applied=[] skipped=1 errors=[]
+HTTP/SSE server starts at 127.0.0.1:8765
+HTTP/SSE receives GET /sse and POST /messages requests
+metadata_after_u004.dirty=false
+artifact=disposable-vm-guest-agent-smoke / 7401236989
+```
+
+This verifies real MCP client transport and tool-result plumbing. Successful worker-generated replay remains covered by U001; U004 intentionally treats `execute_idapython` as a real-client structured-result check.
+
+Run `26925755930` closed U005, the multi-IDA instance selector test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u005_multi_ida_instance_selection
+payload status=passed
+same-directory copy=test1_u005_copy.dll
+primary instance=7388_test1.dll port=13338 database=test1.dll
+copy instance=2328_test1_u005_copy.dll port=13339 database=test1_u005_copy.dll
+list_ida_instances.count=2
+no selector rejected multiple instances
+full instance_id selectors chose primary/copy correctly
+unique substring selectors chose primary/copy correctly
+port selector chose copy
+port precedence over conflicting instance_id chose copy
+ambiguous selector `test1` rejected as matched multiple instance ids
+missing selector rejected as not found
+list_functions returned selected instance_id for both primary and copy
+artifact=disposable-vm-guest-agent-smoke / 7401401506
+```
+
+This verifies the selector rules that protect multi-database sessions from accidentally reading or writing the wrong IDA instance.
+
+
 Run `26925694907` covered U006, the main `/functions` corner-case semantics, after fixing a Windows console encoding issue found in run `26925551740`:
 
 ```text
@@ -199,6 +255,31 @@ artifact=disposable-vm-guest-agent-smoke / 7401369820
 ```
 
 Fixture-dependent `/functions` residuals remain: empty database / 0 functions, huge function-count pagination, duplicate function names, and demangled-name fixtures.
+
+Run `26926417574` closed U013, the patch_bytes complex-case test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u013_patch_bytes_complex_cases
+payload status=passed
+old_bytes mismatch status=error; metadata stayed clean
+unmapped-only patch status=error; metadata stayed clean
+dry-run status=ok applied=[] skipped=7 errors=[]
+destructive partial status=partial applied=6 errors=1
+applied ops=[op-multi-byte-code, op-middle-byte-code, op-same-byte-code, op-repeat-byte-1, op-repeat-byte-2, op-data-byte]
+partial error op=op-unmapped-partial-stop
+code bytes after partial=b772f22658ff0048ff25da300000cccc
+data byte at 0x180004000 changed ff -> 00
+disassembly refresh observed after patch
+metadata_after_partial.dirty=true
+second destructive apply rejected when dirty
+artifact=disposable-vm-guest-agent-smoke / 7401627652
+```
+
+This verifies the most important `patch_bytes` replay edge cases and adds explicit `old_bytes_hex` checking before mutation.
 
 ## Failure lessons and fixes
 
@@ -416,6 +497,7 @@ Rule:
 - Do not fail IDA-Script-MCP smoke because unrelated third-party plugin warnings appear.
 - Do fail if `IDA-Script-MCP` support files produce `PLUGIN_ENTRY` or import errors.
 
+
 ### 9. Windows guest stdout may use GBK; escape non-ASCII JSON printed to console
 
 Symptom in run `26925551740`:
@@ -507,6 +589,13 @@ dedicated action/mode, not default full smoke
 | `26923830535` | `fa086d2...` | Success | U003 worker failure-state matrix passed; artifact `7400695878`. |
 | `26925551740` | `df09bff...` | Failure | U006 assertions passed, then final stdout failed on GBK `UnicodeEncodeError` for `☃`. |
 | `26925694907` | `231cd63...` | Success | U006 `/functions` corner-case mode passed; artifact `7401369820`. |
+| `26924502072` | `7d14f8d...` | Failure | U004 first attempt installed MCP deps through required proxy and started stdio client, but tool args missed FastMCP `params` wrapper. |
+| `26924654174` | `c6a34c0...` | Failure | U004 stdio read tools passed; execute_idapython through separate MCP server process hard-timed out. |
+| `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
+| `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
+| `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
+| `26926417574` | `ac7cbab...` | Success | U013 patch_bytes complex cases passed; artifact `7401627652`. |
 
 ## Current conclusion
 
@@ -518,13 +607,14 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, and the U006 `/functions` main corner-case semantics are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, and U013 patch_bytes complex cases are now verified separately.
 
-The remaining backlog starts after the core V2.3 worker lifecycle work. Next likely areas are:
+The remaining backlog after U013 includes:
 
 ```text
-U004 real MCP client end-to-end
-U005 multi-IDA instance selection
+U010/U011/U012/U014 apply_changes corner cases
 U006R fixture-dependent `/functions` residuals
-apply_changes/read-only endpoint corner cases
+read-only endpoint corner cases
+installer/client config coverage
+negative replay/fingerprint edge cases
 ```
