@@ -118,6 +118,13 @@ class TestReadToolInputs:
         assert params.direction == "to"
         assert params.xref_kind == "code"
 
+    def test_xrefs_input_accepts_flow_and_zero_limit(self):
+        params = GetXrefsInput(address="0x401000", direction="from", xref_kind="flow", limit=0)
+        assert params.address == "0x401000"
+        assert params.direction == "from"
+        assert params.xref_kind == "flow"
+        assert params.limit == 0
+
 
 class TestExecuteIdapython:
     """Tests for isolated public execute_idapython routing."""

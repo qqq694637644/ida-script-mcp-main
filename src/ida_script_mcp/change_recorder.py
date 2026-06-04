@@ -184,8 +184,7 @@ class ChangeRecorder:
                 self._patch_patch_int(module_name, "patch_dword", 4)
                 self._patch_patch_int(module_name, "patch_qword", 8)
             self._patch_patch_bytes("ida_bytes", "patch_bytes")
-            self._patch_type("idc", "SetType")
-            self._patch_type("idc", "set_type")
+            self._patch_any_type_alias("idc", ("SetType", "set_type"))
             self._patch_apply_tinfo("ida_typeinf", "apply_tinfo")
         except Exception:
             self.uninstall()
@@ -375,6 +374,28 @@ class ChangeRecorder:
 
         self._replace(module_name, name, factory)
 
+    def _patch_any_type_alias(self, module_name: str, names: tuple[str, ...]) -> None:
+        """Patch all available IDC type aliases, requiring at least one.
+
+        IDA versions differ here: some expose ``idc.SetType`` but not
+        ``idc.set_type``. Treat the alias group as a single required capability
+        instead of requiring every spelling to exist.
+        """
+
+        patched: list[str] = []
+        missing: list[str] = []
+        for name in names:
+            try:
+                self._patch_type(module_name, name)
+            except RecorderError as exc:
+                missing.append(str(exc))
+            else:
+                patched.append(name)
+        if not patched:
+            alias_list = "/".join(f"{module_name}.{name}" for name in names)
+            detail = "; ".join(missing)
+            raise RecorderError(f"Required IDAPython API is unavailable: {alias_list}: {detail}")
+
     def _patch_apply_tinfo(self, module_name: str, name: str) -> None:
         def factory(original):
             def wrapper(ea, tinfo, flags=0, *args, **kwargs):
@@ -441,7 +462,10 @@ class McpChangesApi:
         return ok
 
     def set_type(self, ea: int, decl: str, flags: int = 0):
-        set_type = self._required_api("idc", "set_type")
+        try:
+            set_type = self._required_api("idc", "set_type")
+        except RecorderError:
+            set_type = self._required_api("idc", "SetType")
         with self.recorder.suppress_recording():
             ok = set_type(ea, decl)
         if not ok:

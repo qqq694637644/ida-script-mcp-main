@@ -66,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--test-mode",
         default=DEFAULT_IDA_API_TEST_MODE,
-        choices=["basic", "full", "apply_changes"],
+        choices=["basic", "full", "apply_changes", "inspect_address", "functions_corner", "decompile_corner_case"],
     )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
@@ -207,6 +207,302 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         return database_path
 
 
+    def _u009_get_name(idc_module, ea):
+        for getter_name, args in (
+            ("get_name", (ea,)),
+            ("get_name", (ea, 0)),
+            ("get_func_name", (ea,)),
+        ):
+            getter = getattr(idc_module, getter_name, None)
+            if getter is None:
+                continue
+            try:
+                value = getter(*args)
+            except TypeError:
+                continue
+            except Exception:
+                continue
+            if value:
+                return str(value)
+        return ""
+
+
+    def _u009_select_function(ida_funcs_module):
+        try:
+            import idautils
+
+            for ea in idautils.Functions():
+                func = ida_funcs_module.get_func(ea)
+                if func is None:
+                    continue
+                start_ea = int(getattr(func, "start_ea", 0) or 0)
+                end_ea = int(getattr(func, "end_ea", start_ea) or start_ea)
+                if end_ea > start_ea:
+                    return func
+        except Exception:
+            pass
+
+        badaddr = int(getattr(__import__("idaapi"), "BADADDR", 0xFFFFFFFFFFFFFFFF))
+        next_func = getattr(ida_funcs_module, "get_next_func", None)
+        if next_func is None:
+            return None
+        ea = 0
+        for _ in range(2048):
+            func = next_func(ea)
+            if func is None:
+                return None
+            start_ea = int(getattr(func, "start_ea", 0) or 0)
+            end_ea = int(getattr(func, "end_ea", start_ea) or start_ea)
+            if end_ea > start_ea:
+                return func
+            ea = end_ea if end_ea > start_ea else start_ea + 1
+            if ea == badaddr:
+                return None
+        return None
+
+
+    def _u009_select_instruction_middle(ida_bytes_module, func):
+        start_ea = int(getattr(func, "start_ea", 0) or 0)
+        end_ea = int(getattr(func, "end_ea", start_ea) or start_ea)
+        try:
+            import idautils
+
+            for ea in idautils.FuncItems(start_ea):
+                ea = int(ea)
+                try:
+                    item_end = int(ida_bytes_module.get_item_end(ea))
+                except Exception:
+                    continue
+                if item_end > ea + 1 and item_end <= end_ea:
+                    return ea + 1, ea, item_end
+        except Exception:
+            pass
+        if end_ea > start_ea + 1:
+            return start_ea + 1, start_ea, end_ea
+        return start_ea, start_ea, end_ea
+
+
+    def _u009_select_data_address(ida_bytes_module, ida_segment_module):
+        badaddr = int(getattr(__import__("idaapi"), "BADADDR", 0xFFFFFFFFFFFFFFFF))
+        first_seg = getattr(ida_segment_module, "get_first_seg", None)
+        next_seg = getattr(ida_segment_module, "get_next_seg", None)
+        get_class = getattr(ida_segment_module, "get_segm_class", None)
+        if first_seg is None or next_seg is None:
+            return None
+
+        best_code_segment_non_code = None
+        seg = first_seg()
+        visited = set()
+        while seg is not None:
+            start_ea = int(getattr(seg, "start_ea", 0) or 0)
+            end_ea = int(getattr(seg, "end_ea", start_ea) or start_ea)
+            if start_ea in visited:
+                break
+            visited.add(start_ea)
+            seg_class = ""
+            if get_class is not None:
+                try:
+                    seg_class = str(get_class(seg) or "")
+                except Exception:
+                    seg_class = ""
+            upper_class = seg_class.upper()
+            ea = start_ea
+            limit = min(end_ea, start_ea + 0x20000)
+            while ea < limit:
+                try:
+                    flags = ida_bytes_module.get_flags(ea)
+                except Exception:
+                    flags = 0
+                try:
+                    is_code = bool(ida_bytes_module.is_code(flags))
+                except Exception:
+                    is_code = False
+                try:
+                    is_loaded = bool(ida_bytes_module.is_loaded(ea))
+                except Exception:
+                    is_loaded = True
+                if (not is_code) and is_loaded:
+                    if upper_class != "CODE":
+                        return ea
+                    if best_code_segment_non_code is None:
+                        best_code_segment_non_code = ea
+
+                next_addr = getattr(ida_bytes_module, "next_addr", None)
+                if next_addr is None:
+                    ea += 1
+                    continue
+                try:
+                    candidate = int(next_addr(ea))
+                except Exception:
+                    ea += 1
+                    continue
+                if candidate == badaddr or candidate <= ea:
+                    ea += 1
+                else:
+                    ea = candidate
+            seg = next_seg(start_ea)
+        return best_code_segment_non_code
+
+
+    def _u009_select_unmapped_address(ida_bytes_module, ida_segment_module):
+        first_seg = getattr(ida_segment_module, "get_first_seg", None)
+        next_seg = getattr(ida_segment_module, "get_next_seg", None)
+        getseg = getattr(ida_segment_module, "getseg", None)
+        is_mapped = getattr(ida_bytes_module, "is_mapped", None)
+        max_end = 0
+        if first_seg is not None and next_seg is not None:
+            seg = first_seg()
+            visited = set()
+            while seg is not None:
+                start_ea = int(getattr(seg, "start_ea", 0) or 0)
+                end_ea = int(getattr(seg, "end_ea", start_ea) or start_ea)
+                if start_ea in visited:
+                    break
+                visited.add(start_ea)
+                max_end = max(max_end, end_ea)
+                seg = next_seg(start_ea)
+
+        candidates = []
+        if max_end:
+            candidates.extend(max_end + delta for delta in (0x100000, 0x1000000, 0x10000000, 0x100000000))
+        candidates.extend((0x700000000000, 0x7FFF00000000, 0x1000000000000, 0x4000000000000000))
+
+        badaddr = int(getattr(__import__("idaapi"), "BADADDR", 0xFFFFFFFFFFFFFFFF))
+        fallback = candidates[0]
+        for candidate in candidates:
+            if candidate <= 0 or candidate >= badaddr:
+                continue
+            fallback = candidate
+            if getseg is not None:
+                try:
+                    if getseg(candidate) is not None:
+                        continue
+                except Exception:
+                    pass
+            if is_mapped is not None:
+                try:
+                    if is_mapped(candidate):
+                        continue
+                except Exception:
+                    pass
+            try:
+                data = ida_bytes_module.get_bytes(candidate, 1)
+            except Exception:
+                return candidate
+            if data is None or data == b"" or data == "":
+                return candidate
+        return fallback
+
+
+    def _u009_set_type(idc_module, ea, decl):
+        setter = getattr(idc_module, "set_type", None)
+        if setter is None:
+            setter = getattr(idc_module, "SetType", None)
+        if setter is None:
+            return False, "idc.set_type/idc.SetType unavailable"
+        try:
+            return bool(setter(ea, decl)), None
+        except Exception as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+
+
+    def _prepare_u009_inspect_address_seed(idaapi_module, ida_loader_module):
+        import ida_bytes
+        import ida_funcs
+        import ida_name
+        import ida_segment
+        import idc
+
+        _stage("u009_seed_start")
+        func = _u009_select_function(ida_funcs)
+        if func is None:
+            raise RuntimeError("U009 could not find a function to inspect")
+        target_ea = int(getattr(func, "start_ea", 0) or 0)
+        function_end_ea = int(getattr(func, "end_ea", target_ea) or target_ea)
+        middle_ea, middle_head_ea, middle_item_end_ea = _u009_select_instruction_middle(ida_bytes, func)
+        data_ea = _u009_select_data_address(ida_bytes, ida_segment)
+        unmapped_ea = _u009_select_unmapped_address(ida_bytes, ida_segment)
+
+        run_id = str(int(time.time()))
+        requested_unicode_name = f"u009_名前_测试_{run_id}"
+        fallback_name = f"u009_inspect_address_{run_id}"
+        set_name = getattr(ida_name, "set_name", None)
+        if set_name is None:
+            set_name = getattr(idc, "set_name", None)
+        if set_name is None:
+            raise RuntimeError("U009 cannot seed target name because set_name is unavailable")
+
+        unicode_name_set_ok = False
+        unicode_name_error = None
+        try:
+            unicode_name_set_ok = bool(set_name(target_ea, requested_unicode_name, getattr(ida_name, "SN_FORCE", 0)))
+        except Exception as exc:
+            unicode_name_error = f"{type(exc).__name__}: {exc}"
+        actual_name = _u009_get_name(idc, target_ea)
+        if not actual_name or (not unicode_name_set_ok):
+            fallback_flags = getattr(ida_name, "SN_FORCE", 0) | getattr(ida_name, "SN_NOCHECK", 0)
+            fallback_ok = bool(set_name(target_ea, fallback_name, fallback_flags))
+            if not fallback_ok:
+                raise RuntimeError(f"U009 fallback set_name failed for {hex(target_ea)}")
+            actual_name = _u009_get_name(idc, target_ea)
+
+        regular_comment = f"U009 regular 注释 🚀 {run_id}"
+        repeatable_comment = f"U009 repeatable 注释 Ω {run_id}"
+        function_comment = f"U009 function 注释 Ф {run_id}"
+        repeatable_function_comment = f"U009 repeatable function 注释 λ {run_id}"
+        ida_bytes.set_cmt(target_ea, regular_comment, 0)
+        ida_bytes.set_cmt(target_ea, repeatable_comment, 1)
+        ida_funcs.set_func_cmt(func, function_comment, 0)
+        ida_funcs.set_func_cmt(func, repeatable_function_comment, 1)
+
+        type_decl = f"int __cdecl {actual_name}(void);"
+        type_set_ok, type_error = _u009_set_type(idc, target_ea, type_decl)
+        type_text_after_seed = None
+        for getter_name, args in (("get_type", (target_ea,)), ("print_type", (target_ea, 0))):
+            getter = getattr(idc, getter_name, None)
+            if getter is None:
+                continue
+            try:
+                value = getter(*args)
+            except Exception:
+                continue
+            if value:
+                type_text_after_seed = str(value)
+                break
+
+        database_path = _save_database_for_apply_changes(idaapi_module, ida_loader_module)
+        seed = {
+            "target_ea": target_ea,
+            "target_hex": hex(target_ea),
+            "function_end_ea": function_end_ea,
+            "instruction_middle_ea": int(middle_ea),
+            "instruction_middle_hex": hex(int(middle_ea)),
+            "instruction_middle_head_ea": int(middle_head_ea),
+            "instruction_middle_item_end_ea": int(middle_item_end_ea),
+            "instruction_middle_is_tail": int(middle_ea) != int(middle_head_ea),
+            "data_ea": int(data_ea) if data_ea is not None else None,
+            "data_hex": hex(int(data_ea)) if data_ea is not None else None,
+            "unmapped_ea": int(unmapped_ea),
+            "unmapped_hex": hex(int(unmapped_ea)),
+            "requested_unicode_name": requested_unicode_name,
+            "fallback_name": fallback_name,
+            "actual_name": actual_name,
+            "unicode_name_set_ok": bool(unicode_name_set_ok and actual_name == requested_unicode_name),
+            "unicode_name_error": unicode_name_error,
+            "regular_comment": regular_comment,
+            "repeatable_comment": repeatable_comment,
+            "function_comment": function_comment,
+            "repeatable_function_comment": repeatable_function_comment,
+            "type_decl": type_decl,
+            "type_set_ok": bool(type_set_ok),
+            "type_error": type_error,
+            "type_text_after_seed": type_text_after_seed,
+            "database_path": database_path,
+        }
+        _stage("u009_seed_done", seed)
+        return seed
+
+
     def main():
         try:
             _stage("ida_bootstrap_start")
@@ -218,8 +514,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             ida_auto.auto_wait()
             _stage("auto_wait_done")
 
+            u009_seed = None
             if IDA_API_TEST_MODE == "apply_changes":
                 _save_database_for_apply_changes(idaapi, ida_loader)
+            if IDA_API_TEST_MODE == "inspect_address":
+                u009_seed = _prepare_u009_inspect_address_seed(idaapi, ida_loader)
 
             if PLUGIN_DIR not in sys.path:
                 sys.path.insert(0, PLUGIN_DIR)
@@ -264,6 +563,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 "input_file_path": input_file_path,
                 "database_path": database_path,
                 "instance_id": getattr(plugin_module.instance_registry, "instance_id", None),
+                "u009_seed": u009_seed,
             }
             _write_json(READY_PATH, ready)
             _stage("ready_written", ready)
@@ -292,7 +592,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         with HEARTBEAT_PATH.open("a", encoding="utf-8") as output:
             output.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
             output.write("\n")
-        print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+        print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
 
     def _sha256(path: Path) -> str:
@@ -763,6 +1063,756 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         _stage("apply_changes_rejected_when_dirty_done")
 
 
+
+    def _expect_functions_bad_request(result: dict, base_url: str, label: str, payload: dict, expected_field: str) -> None:
+        request_payload = {"offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True}
+        request_payload.update(payload)
+        _stage(f"functions_corner_{label}_start", request_payload)
+        response = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            request_payload,
+            expected_status=400,
+            timeout=10,
+        )
+        body = response["body"]
+        result["responses"][f"functions_corner_{label}"] = body
+        _check(
+            result,
+            f"functions rejects {label} with structured 400",
+            body.get("status") == "error"
+            and body.get("field") == expected_field
+            and bool(body.get("error")),
+            body,
+        )
+        _stage(f"functions_corner_{label}_done")
+
+
+    def _run_functions_corner_tests(base_url: str, functions_page: dict, result: dict) -> None:
+        functions = functions_page.get("functions") or []
+        total_functions = int(functions_page.get("total", 0) or 0)
+        _check(result, "U006 has at least one fixture function", bool(functions), functions_page)
+        first_function = functions[0]
+        first_name = str(first_function.get("name") or "")
+        first_segment = first_function.get("segment")
+
+        _stage("functions_corner_include_matrix_start", {"total_functions": total_functions})
+        include_matrix = {}
+        for include_thunks in (False, True):
+            for include_library_functions in (False, True):
+                key = f"thunks_{str(include_thunks).lower()}_library_{str(include_library_functions).lower()}"
+                response = _json_request(
+                    "POST",
+                    base_url,
+                    "/functions",
+                    {
+                        "offset": 0,
+                        "limit": 25,
+                        "include_thunks": include_thunks,
+                        "include_library_functions": include_library_functions,
+                    },
+                    expected_status=200,
+                    timeout=10,
+                )
+                body = response["body"]
+                include_matrix[key] = body
+                result["responses"][f"functions_corner_include_{key}"] = body
+                _check(result, f"functions include matrix {key} returns a list", isinstance(body.get("functions"), list), body)
+                _check(result, f"functions include matrix {key} respects limit", body.get("returned", 0) <= 25, body)
+        default_total = int(include_matrix["thunks_false_library_false"].get("total", 0) or 0)
+        thunks_total = int(include_matrix["thunks_true_library_false"].get("total", 0) or 0)
+        library_total = int(include_matrix["thunks_false_library_true"].get("total", 0) or 0)
+        all_total = int(include_matrix["thunks_true_library_true"].get("total", 0) or 0)
+        _check(
+            result,
+            "functions include flags are monotonic",
+            default_total <= thunks_total <= all_total and default_total <= library_total <= all_total,
+            {
+                "default_total": default_total,
+                "thunks_total": thunks_total,
+                "library_total": library_total,
+                "all_total": all_total,
+            },
+        )
+        _stage("functions_corner_include_matrix_done")
+
+        if first_segment:
+            _stage("functions_corner_segment_match_start", {"segment": first_segment})
+            segment_match = _json_request(
+                "POST",
+                base_url,
+                "/functions",
+                {
+                    "offset": 0,
+                    "limit": 25,
+                    "segment": first_segment,
+                    "include_thunks": True,
+                    "include_library_functions": True,
+                },
+                expected_status=200,
+                timeout=10,
+            )
+            segment_body = segment_match["body"]
+            result["responses"]["functions_corner_segment_match"] = segment_body
+            _check(result, "functions segment filter returns a list", isinstance(segment_body.get("functions"), list), segment_body)
+            _check(
+                result,
+                "functions segment filter only returns selected segment",
+                all(item.get("segment") == first_segment for item in (segment_body.get("functions") or [])),
+                segment_body,
+            )
+            _stage("functions_corner_segment_match_done")
+
+        _stage("functions_corner_segment_missing_start")
+        segment_missing = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {
+                "offset": 0,
+                "limit": 25,
+                "segment": "__ida_script_mcp_missing_segment__",
+                "include_thunks": True,
+                "include_library_functions": True,
+            },
+            expected_status=200,
+            timeout=10,
+        )
+        missing_segment_body = segment_missing["body"]
+        result["responses"]["functions_corner_segment_missing"] = missing_segment_body
+        _check(
+            result,
+            "functions missing segment returns empty page",
+            missing_segment_body.get("returned") == 0 and missing_segment_body.get("functions") == [],
+            missing_segment_body,
+        )
+        _stage("functions_corner_segment_missing_done")
+
+        if first_name:
+            name_probe = first_name[: max(1, min(4, len(first_name)))]
+            case_probe = name_probe.swapcase() or name_probe.upper()
+            _stage("functions_corner_name_case_start", {"name_probe": name_probe, "case_probe": case_probe})
+            name_case = _json_request(
+                "POST",
+                base_url,
+                "/functions",
+                {
+                    "offset": 0,
+                    "limit": 25,
+                    "name_contains": case_probe,
+                    "include_thunks": True,
+                    "include_library_functions": True,
+                },
+                expected_status=200,
+                timeout=10,
+            )
+            name_case_body = name_case["body"]
+            result["responses"]["functions_corner_name_case"] = name_case_body
+            returned_names = [str(item.get("name") or "") for item in (name_case_body.get("functions") or [])]
+            _check(result, "functions name_contains is case-insensitive", bool(returned_names), name_case_body)
+            _check(
+                result,
+                "functions name_contains results match case-insensitive probe",
+                all(case_probe.lower() in name.lower() for name in returned_names),
+                {"case_probe": case_probe, "returned_names": returned_names},
+            )
+            _stage("functions_corner_name_case_done")
+
+        _stage("functions_corner_name_unicode_special_start")
+        name_unicode = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {
+                "offset": 0,
+                "limit": 25,
+                "name_contains": "☃_unlikely_*[]",
+                "include_thunks": True,
+                "include_library_functions": True,
+            },
+            expected_status=200,
+            timeout=10,
+        )
+        name_unicode_body = name_unicode["body"]
+        result["responses"]["functions_corner_name_unicode_special"] = name_unicode_body
+        _check(result, "functions unicode/special name filter returns a list", isinstance(name_unicode_body.get("functions"), list), name_unicode_body)
+        _stage("functions_corner_name_unicode_special_done")
+
+        _stage("functions_corner_numeric_string_params_start")
+        numeric_string_params = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {"offset": "0", "limit": "2", "include_thunks": "false", "include_library_functions": "true"},
+            expected_status=200,
+            timeout=10,
+        )
+        numeric_string_body = numeric_string_params["body"]
+        result["responses"]["functions_corner_numeric_string_params"] = numeric_string_body
+        _check(
+            result,
+            "functions accepts numeric string offset/limit and boolean strings",
+            numeric_string_body.get("offset") == 0
+            and numeric_string_body.get("limit") == 2
+            and numeric_string_body.get("include_thunks") is False
+            and numeric_string_body.get("include_library_functions") is True
+            and numeric_string_body.get("returned", 0) <= 2,
+            numeric_string_body,
+        )
+        _stage("functions_corner_numeric_string_params_done")
+
+        invalid_cases = [
+            ("limit_zero", {"limit": 0}, "limit"),
+            ("limit_negative", {"limit": -1}, "limit"),
+            ("limit_too_large", {"limit": 5001}, "limit"),
+            ("limit_non_integer", {"limit": "not-an-int"}, "limit"),
+            ("offset_negative", {"offset": -1}, "offset"),
+            ("offset_non_integer", {"offset": "not-an-int"}, "offset"),
+            ("name_non_string", {"name_contains": 123}, "name_contains"),
+            ("segment_non_string", {"segment": 123}, "segment"),
+            ("include_thunks_invalid", {"include_thunks": "not-bool"}, "include_thunks"),
+            ("include_library_invalid", {"include_library_functions": "not-bool"}, "include_library_functions"),
+        ]
+        _stage("functions_corner_invalid_inputs_start", {"case_count": len(invalid_cases)})
+        for label, payload, expected_field in invalid_cases:
+            _expect_functions_bad_request(result, base_url, label, payload, expected_field)
+        _stage("functions_corner_invalid_inputs_done")
+
+        result.setdefault("warnings", []).append(
+            {
+                "name": "U006 fixture limits",
+                "message": "This run covers /functions boundary semantics on test1.dll; empty database, huge function-count pagination, and duplicate/demangled-name fixtures still need dedicated binaries if exact fixture coverage is required.",
+            }
+        )
+
+
+    def _u007_note(result: dict, name: str, detail: object | None = None) -> None:
+        result["warnings"].append({"name": name, "detail": detail})
+
+
+    def _u007_decompile_request(
+        base_url: str,
+        result: dict,
+        key: str,
+        payload: dict,
+        *,
+        timeout: int = 30,
+    ) -> dict:
+        _stage(f"u007_{key}_start", payload)
+        started = time.monotonic()
+        response = _json_request(
+            "POST",
+            base_url,
+            "/decompile",
+            payload,
+            expected_status=200,
+            timeout=timeout,
+        )
+        elapsed = time.monotonic() - started
+        body = response["body"]
+        result["responses"][f"u007_{key}"] = body
+        result.setdefault("timings", {})[f"u007_{key}_seconds"] = elapsed
+        _stage(
+            f"u007_{key}_done",
+            {
+                "found": body.get("found"),
+                "hexrays_available": body.get("hexrays_available"),
+                "elapsed_seconds": elapsed,
+            },
+        )
+        return body
+
+
+    def _u007_check_pseudocode_or_warning(result: dict, name: str, body: dict) -> None:
+        if body.get("hexrays_available") is True:
+            _check(
+                result,
+                f"{name} returns pseudocode when Hex-Rays is available",
+                isinstance(body.get("pseudocode"), str) and bool(body.get("pseudocode", "").strip()),
+                body,
+            )
+        else:
+            _check(
+                result,
+                f"{name} returns warning when Hex-Rays is unavailable or fails",
+                isinstance(body.get("warning"), str) and bool(body.get("warning")),
+                body,
+            )
+
+
+    def _run_u007_decompile_corner_cases(base_url: str, functions_page: dict, result: dict) -> None:
+        _stage("u007_decompile_corner_cases_start")
+        first_page_functions = functions_page.get("functions") or []
+        _check(result, "U007 has a selected function", bool(first_page_functions), functions_page)
+
+        total_functions = int(functions_page.get("total", len(first_page_functions)) or 0)
+        all_functions_response = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {
+                "offset": 0,
+                "limit": max(total_functions + 5, 200),
+                "include_thunks": True,
+                "include_library_functions": True,
+            },
+            expected_status=200,
+            timeout=15,
+        )
+        result["responses"]["u007_all_functions"] = all_functions_response["body"]
+        all_functions = all_functions_response["body"].get("functions") or first_page_functions
+        _check(result, "U007 all-functions query returns a list", isinstance(all_functions, list), all_functions_response["body"])
+
+        primary_function = max(
+            (function for function in all_functions if int(function.get("size") or 0) > 1),
+            key=lambda function: int(function.get("size") or 0),
+            default=first_page_functions[0],
+        )
+        result["u007_primary_function"] = primary_function
+        primary_start = int(primary_function["start_ea"])
+        primary_end = int(primary_function.get("end_ea") or primary_start)
+        primary_size = max(0, primary_end - primary_start)
+        primary_name = primary_function.get("name") or ""
+
+        start_body = _u007_decompile_request(
+            base_url,
+            result,
+            "start_address",
+            {"address": hex(primary_start), "include_disassembly": True},
+            timeout=30,
+        )
+        _check(result, "U007 start address resolves function", start_body.get("found") is True, start_body)
+        _check(result, "U007 start address includes disassembly", isinstance(start_body.get("disassembly"), list), start_body)
+        _u007_check_pseudocode_or_warning(result, "U007 start address", start_body)
+
+        if primary_size > 1:
+            middle_ea = primary_start + max(1, min(primary_size - 1, 4))
+            middle_body = _u007_decompile_request(
+                base_url,
+                result,
+                "middle_address",
+                {"address": hex(middle_ea), "include_disassembly": True},
+                timeout=30,
+            )
+            _check(result, "U007 middle address resolves function", middle_body.get("found") is True, middle_body)
+            _check(result, "U007 middle address resolves same function", int(middle_body.get("start_ea") or -1) == primary_start, middle_body)
+            _check(result, "U007 middle address records resolved_ea", int(middle_body.get("resolved_ea") or -1) == middle_ea, middle_body)
+            _check(result, "U007 middle address includes disassembly", isinstance(middle_body.get("disassembly"), list), middle_body)
+            _u007_check_pseudocode_or_warning(result, "U007 middle address", middle_body)
+        else:
+            _u007_note(result, "middle address not tested; selected function is one byte", primary_function)
+
+        if primary_name:
+            name_body = _u007_decompile_request(
+                base_url,
+                result,
+                "name_query",
+                {"name": primary_name, "include_disassembly": True},
+                timeout=30,
+            )
+            _check(result, "U007 name query resolves function", name_body.get("found") is True, name_body)
+            _check(result, "U007 name query resolves same function", int(name_body.get("start_ea") or -1) == primary_start, name_body)
+            _check(result, "U007 name query includes disassembly", isinstance(name_body.get("disassembly"), list), name_body)
+            _u007_check_pseudocode_or_warning(result, "U007 name query", name_body)
+        else:
+            _u007_note(result, "name query not tested; selected function has no name", primary_function)
+
+        missing_name_body = _u007_decompile_request(
+            base_url,
+            result,
+            "missing_name",
+            {"name": "__ida_script_mcp_u007_missing_function__", "include_disassembly": True},
+            timeout=10,
+        )
+        _check(result, "U007 missing name is structured not found", missing_name_body.get("found") is False and bool(missing_name_body.get("error")), missing_name_body)
+
+        no_function_body = _u007_decompile_request(
+            base_url,
+            result,
+            "no_function_address",
+            {"address": "0x0", "include_disassembly": True},
+            timeout=10,
+        )
+        _check(result, "U007 non-function address is structured not found", no_function_body.get("found") is False and bool(no_function_body.get("error")), no_function_body)
+
+        invalid_address_body = _u007_decompile_request(
+            base_url,
+            result,
+            "invalid_address",
+            {"address": "not-an-address", "include_disassembly": True},
+            timeout=10,
+        )
+        _check(result, "U007 invalid address is structured not found", invalid_address_body.get("found") is False and bool(invalid_address_body.get("error")), invalid_address_body)
+
+        thunk_or_library = next(
+            (
+                function
+                for function in all_functions
+                if function.get("is_thunk") is True or function.get("is_library") is True
+            ),
+            None,
+        )
+        if thunk_or_library is not None:
+            special_start = int(thunk_or_library["start_ea"])
+            special_body = _u007_decompile_request(
+                base_url,
+                result,
+                "thunk_or_library",
+                {"address": hex(special_start), "include_disassembly": True},
+                timeout=30,
+            )
+            _check(result, "U007 thunk/library address resolves function", special_body.get("found") is True, special_body)
+            _check(result, "U007 thunk/library includes disassembly", isinstance(special_body.get("disassembly"), list), special_body)
+            _u007_check_pseudocode_or_warning(result, "U007 thunk/library", special_body)
+        else:
+            _u007_note(result, "no thunk/import/library function observed in test database", {"total_functions": len(all_functions)})
+
+        largest_function = max(
+            all_functions,
+            key=lambda function: int(function.get("size") or 0),
+            default=primary_function,
+        )
+        largest_start = int(largest_function["start_ea"])
+        largest_body = _u007_decompile_request(
+            base_url,
+            result,
+            "largest_function",
+            {"address": hex(largest_start), "include_disassembly": True},
+            timeout=45,
+        )
+        _check(result, "U007 largest function resolves", largest_body.get("found") is True, largest_body)
+        _check(result, "U007 largest function includes disassembly", isinstance(largest_body.get("disassembly"), list), largest_body)
+        _u007_check_pseudocode_or_warning(result, "U007 largest function", largest_body)
+
+        observed_hexrays_failure_with_disassembly = False
+        for key, body in result["responses"].items():
+            if not key.startswith("u007_") or not isinstance(body, dict):
+                continue
+            if body.get("found") is True and body.get("hexrays_available") is False:
+                observed_hexrays_failure_with_disassembly = True
+                _check(result, f"{key} keeps disassembly when pseudocode is unavailable", isinstance(body.get("disassembly"), list), body)
+                _check(result, f"{key} explains pseudocode warning", isinstance(body.get("warning"), str) and bool(body.get("warning")), body)
+
+        if not observed_hexrays_failure_with_disassembly:
+            _u007_note(result, "Hex-Rays unavailable/failure path was not observed in this guest/license/database", None)
+        _u007_note(result, "duplicate function-name ambiguity not force-created in read-only U007 payload", None)
+        _stage("u007_decompile_corner_cases_done")
+
+
+    def _has_non_ascii(text) -> bool:
+        if text is None:
+            return False
+        return any(ord(ch) > 127 for ch in str(text))
+
+
+    def _run_inspect_address_tests(base_url: str, seed: dict, metadata: dict, result: dict) -> None:
+        result["u009_seed"] = seed
+        _check(
+            result,
+            "U009 seed is present",
+            isinstance(seed, dict) and bool(seed.get("target_hex")),
+            seed,
+        )
+        target_hex = str(seed["target_hex"])
+        target_ea = int(seed["target_ea"])
+
+        def inspect(key: str, payload: dict) -> dict:
+            _stage(f"u009_{key}_start", payload)
+            response = _json_request(
+                "POST",
+                base_url,
+                "/inspect_address",
+                payload,
+                expected_status=200,
+                timeout=10,
+            )
+            body = response["body"]
+            result["responses"][key] = body
+            _stage(f"u009_{key}_done")
+            return body
+
+        invalid_address = inspect("inspect_invalid_address", {"address": "not-an-address"})
+        _check(
+            result,
+            "U009 invalid address is structured not-found",
+            invalid_address.get("found") is False,
+            invalid_address,
+        )
+        _check(
+            result,
+            "U009 invalid address reports parse error",
+            "parse" in str(invalid_address.get("error") or "").lower(),
+            invalid_address,
+        )
+
+        missing_target = inspect("inspect_missing_target", {})
+        _check(
+            result,
+            "U009 missing address/name is structured not-found",
+            missing_target.get("found") is False,
+            missing_target,
+        )
+        _check(
+            result,
+            "U009 missing address/name asks for target",
+            "address" in str(missing_target.get("error") or "").lower(),
+            missing_target,
+        )
+
+        byte_count_zero = inspect("inspect_byte_count_zero", {"address": target_hex, "byte_count": 0})
+        _check(
+            result,
+            "U009 byte_count=0 clamps to one",
+            byte_count_zero.get("query", {}).get("byte_count") == 1,
+            byte_count_zero,
+        )
+        _check(
+            result,
+            "U009 byte_count=0 still reads one byte",
+            isinstance(byte_count_zero.get("bytes_hex"), str)
+            and len(byte_count_zero.get("bytes_hex") or "") == 2,
+            byte_count_zero,
+        )
+
+        byte_count_negative = inspect(
+            "inspect_byte_count_negative", {"address": target_hex, "byte_count": -10}
+        )
+        _check(
+            result,
+            "U009 negative byte_count clamps to one",
+            byte_count_negative.get("query", {}).get("byte_count") == 1,
+            byte_count_negative,
+        )
+        _check(
+            result,
+            "U009 negative byte_count still reads one byte",
+            isinstance(byte_count_negative.get("bytes_hex"), str)
+            and len(byte_count_negative.get("bytes_hex") or "") == 2,
+            byte_count_negative,
+        )
+
+        byte_count_huge = inspect(
+            "inspect_byte_count_huge", {"address": target_hex, "byte_count": 999999}
+        )
+        huge_bytes = byte_count_huge.get("bytes_hex") or ""
+        _check(
+            result,
+            "U009 huge byte_count clamps to 64",
+            byte_count_huge.get("query", {}).get("byte_count") == 64,
+            byte_count_huge,
+        )
+        _check(
+            result,
+            "U009 huge byte_count returns bounded bytes",
+            isinstance(huge_bytes, str) and 2 <= len(huge_bytes) <= 128,
+            byte_count_huge,
+        )
+
+        if seed.get("data_hex"):
+            data_address = inspect("inspect_data_address", {"address": seed["data_hex"], "byte_count": 8})
+            _check(result, "U009 data address resolves", data_address.get("found") is True, data_address)
+            _check(
+                result,
+                "U009 data address returns requested ea",
+                int(data_address.get("ea")) == int(seed["data_ea"]),
+                data_address,
+            )
+            _check(
+                result,
+                "U009 data address reads bytes",
+                isinstance(data_address.get("bytes_hex"), str)
+                and len(data_address.get("bytes_hex") or "") >= 2,
+                data_address,
+            )
+        else:
+            result.setdefault("warnings", []).append(
+                {"name": "U009 data address selection skipped", "seed": seed}
+            )
+
+        middle_address = inspect(
+            "inspect_instruction_middle",
+            {"address": seed["instruction_middle_hex"], "byte_count": 8},
+        )
+        _check(
+            result,
+            "U009 instruction-middle address resolves",
+            middle_address.get("found") is True,
+            middle_address,
+        )
+        _check(
+            result,
+            "U009 instruction-middle returns requested ea",
+            int(middle_address.get("ea")) == int(seed["instruction_middle_ea"]),
+            middle_address,
+        )
+        _check(
+            result,
+            "U009 selected an actual instruction tail byte",
+            seed.get("instruction_middle_is_tail") is True,
+            seed,
+        )
+        _check(
+            result,
+            "U009 instruction-middle reads bytes",
+            isinstance(middle_address.get("bytes_hex"), str)
+            and len(middle_address.get("bytes_hex") or "") >= 2,
+            middle_address,
+        )
+
+        unmapped_address = inspect(
+            "inspect_unmapped_address", {"address": seed["unmapped_hex"], "byte_count": 8}
+        )
+        _check(
+            result,
+            "U009 unmapped address remains structured",
+            unmapped_address.get("found") is True,
+            unmapped_address,
+        )
+        _check(
+            result,
+            "U009 unmapped address returns requested ea",
+            int(unmapped_address.get("ea")) == int(seed["unmapped_ea"]),
+            unmapped_address,
+        )
+        unmapped_bytes = unmapped_address.get("bytes_hex")
+        _check(
+            result,
+            "U009 unmapped address has no symbol metadata",
+            not unmapped_address.get("name")
+            and unmapped_address.get("comment") is None
+            and unmapped_address.get("repeatable_comment") is None
+            and unmapped_address.get("function_comment") is None
+            and unmapped_address.get("repeatable_function_comment") is None
+            and unmapped_address.get("type") is None
+            and not unmapped_address.get("disassembly"),
+            unmapped_address,
+        )
+        _check(
+            result,
+            "U009 unmapped address has no real bytes",
+            unmapped_bytes is None or set(str(unmapped_bytes).lower()) <= {"f"},
+            unmapped_address,
+        )
+
+        seeded_address = inspect("inspect_seeded_unicode_address", {"address": target_hex, "byte_count": 8})
+        _check(result, "U009 seeded address resolves", seeded_address.get("found") is True, seeded_address)
+        _check(
+            result,
+            "U009 seeded address returns target ea",
+            int(seeded_address.get("ea")) == target_ea,
+            seeded_address,
+        )
+        _check(
+            result,
+            "U009 seeded name is returned",
+            seeded_address.get("name") == seed.get("actual_name"),
+            seeded_address,
+        )
+        _check(
+            result,
+            "U009 Unicode regular comment is preserved",
+            seeded_address.get("comment") == seed.get("regular_comment")
+            and _has_non_ascii(seeded_address.get("comment")),
+            seeded_address,
+        )
+        _check(
+            result,
+            "U009 Unicode repeatable comment is preserved",
+            seeded_address.get("repeatable_comment") == seed.get("repeatable_comment")
+            and _has_non_ascii(seeded_address.get("repeatable_comment")),
+            seeded_address,
+        )
+        _check(
+            result,
+            "U009 Unicode function comment is preserved",
+            seeded_address.get("function_comment") == seed.get("function_comment")
+            and _has_non_ascii(seeded_address.get("function_comment")),
+            seeded_address,
+        )
+        _check(
+            result,
+            "U009 Unicode repeatable function comment is preserved",
+            seeded_address.get("repeatable_function_comment")
+            == seed.get("repeatable_function_comment")
+            and _has_non_ascii(seeded_address.get("repeatable_function_comment")),
+            seeded_address,
+        )
+        if seed.get("type_set_ok"):
+            _check(
+                result,
+                "U009 type text is returned",
+                isinstance(seeded_address.get("type"), str) and bool(seeded_address.get("type")),
+                seeded_address,
+            )
+        else:
+            result.setdefault("warnings", []).append(
+                {"name": "U009 type seeding was not accepted by IDA", "seed": seed}
+            )
+        if seed.get("unicode_name_set_ok"):
+            _check(
+                result,
+                "U009 Unicode name is preserved",
+                seeded_address.get("name") == seed.get("requested_unicode_name")
+                and _has_non_ascii(seeded_address.get("name")),
+                seeded_address,
+            )
+        else:
+            result.setdefault("warnings", []).append(
+                {
+                    "name": "U009 requested Unicode name was not accepted by IDA; tested fallback name lookup instead",
+                    "requested_unicode_name": seed.get("requested_unicode_name"),
+                    "actual_name": seed.get("actual_name"),
+                    "unicode_name_error": seed.get("unicode_name_error"),
+                }
+            )
+
+        by_name = inspect("inspect_by_seeded_name", {"name": seed.get("actual_name"), "byte_count": 8})
+        _check(result, "U009 name lookup resolves seeded name", by_name.get("found") is True, by_name)
+        _check(
+            result,
+            "U009 name lookup returns target ea",
+            int(by_name.get("ea")) == target_ea,
+            by_name,
+        )
+        _check(
+            result,
+            "U009 name lookup bytes match address lookup",
+            by_name.get("bytes_hex") == seeded_address.get("bytes_hex"),
+            by_name,
+        )
+
+        missing_name = inspect("inspect_missing_unicode_name", {"name": "U009_不存在的符号"})
+        _check(
+            result,
+            "U009 missing Unicode name is structured not-found",
+            missing_name.get("found") is False,
+            missing_name,
+        )
+        _check(
+            result,
+            "U009 missing Unicode name reports resolve error",
+            "resolve" in str(missing_name.get("error") or "").lower(),
+            missing_name,
+        )
+
+        metadata_after = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+        result["responses"]["u009_metadata_after"] = metadata_after["body"]
+        _check(
+            result,
+            "U009 inspect_address does not mark apply_changes mutation",
+            metadata_after["body"].get("apply_changes_mutated") is False,
+            metadata_after["body"],
+        )
+        if metadata_after["body"].get("dirty_state_known") is True:
+            _check(
+                result,
+                "U009 seeded database remains clean after read-only inspect calls",
+                metadata_after["body"].get("dirty") is False,
+                metadata_after["body"],
+            )
+
+
     def _run_external_api_tests(ready: dict) -> dict:
         base_url = str(ready["base_url"])
         result = {
@@ -869,7 +1919,21 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             _check(result, "functions name filter is accepted", "functions" in functions_filter["body"], functions_filter["body"])
             _stage("functions_filter_done")
 
+        if IDA_API_TEST_MODE == "functions_corner":
+            _stage("functions_corner_tests_start")
+            _run_functions_corner_tests(base_url, functions_page["body"], result)
+            _stage("functions_corner_tests_done")
+            result["status"] = "passed"
+            return result
+
         if IDA_API_TEST_MODE == "basic":
+            result["status"] = "passed"
+            return result
+
+        if IDA_API_TEST_MODE == "inspect_address":
+            _stage("u009_inspect_address_tests_start", {"address": start_ea_hex})
+            _run_inspect_address_tests(base_url, ready.get("u009_seed") or {}, metadata["body"], result)
+            _stage("u009_inspect_address_tests_done")
             result["status"] = "passed"
             return result
 
@@ -877,6 +1941,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             _stage("apply_changes_tests_start", {"address": start_ea_hex})
             _run_apply_changes_tests(base_url, metadata["body"], functions_page["body"], result)
             _stage("apply_changes_tests_done")
+            result["status"] = "passed"
+            return result
+
+        if IDA_API_TEST_MODE == "decompile_corner_case":
+            _run_u007_decompile_corner_cases(base_url, functions_page["body"], result)
             result["status"] = "passed"
             return result
 
@@ -996,7 +2065,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 raise RuntimeError(f"IDA directory does not exist: {ida_dir}")
             if not dll_path.is_file():
                 raise RuntimeError(f"DLL path does not exist: {dll_path}")
-            if IDA_API_TEST_MODE not in {"basic", "full", "apply_changes"}:
+            if IDA_API_TEST_MODE not in {"basic", "full", "apply_changes", "inspect_address", "functions_corner", "decompile_corner_case"}:
                 raise RuntimeError(f"Unsupported IDA API test mode: {IDA_API_TEST_MODE!r}")
 
             plugin_dir = _install_plugin_files()
@@ -1057,7 +2126,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 }
             )
             _write_json(result_path, result)
-            print("IDA_PLUGIN_API_TEST_RESULT=" + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+            print(
+                "IDA_PLUGIN_API_TEST_RESULT="
+                + json.dumps(result, ensure_ascii=True, sort_keys=True),
+                flush=True,
+            )
 
         return 0 if result.get("status") == "passed" else 1
 
@@ -1074,7 +2147,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                         "message": str(exc),
                         "traceback": traceback.format_exc(),
                     },
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                     sort_keys=True,
                 ),
                 file=sys.stderr,

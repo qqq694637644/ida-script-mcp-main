@@ -25,7 +25,58 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+try:
+    from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+except Exception:  # pragma: no cover - exercised by guest payloads without pydantic.
+    StrictBool = bool  # type: ignore[assignment]
+
+    def ConfigDict(**kwargs: Any) -> dict[str, Any]:  # noqa: N802  # type: ignore[no-redef]
+        return dict(kwargs)
+
+    def Field(default: Any = None, **_kwargs: Any) -> Any:  # noqa: N802  # type: ignore[no-redef]
+        return default
+
+    def model_validator(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
+        def decorator(func):
+            return func
+
+        return decorator
+
+    class BaseModel:  # type: ignore[no-redef]
+        """Tiny fallback used only for importing server helpers in guest payloads."""
+
+        def __init__(self, **kwargs: Any):
+            annotations: dict[str, Any] = {}
+            for cls in reversed(type(self).__mro__):
+                annotations.update(getattr(cls, "__annotations__", {}))
+            for name in annotations:
+                if name == "model_config":
+                    continue
+                if name in kwargs:
+                    setattr(self, name, kwargs.pop(name))
+                elif hasattr(type(self), name):
+                    setattr(self, name, getattr(type(self), name))
+            if kwargs:
+                raise ValueError(f"{type(self).__name__} forbids extra fields: {sorted(kwargs)!r}")
+
+        @classmethod
+        def model_validate(cls, data: Any):
+            if isinstance(data, cls):
+                return data
+            if not isinstance(data, dict):
+                raise ValueError(f"{cls.__name__} requires a dict")
+            return cls(**data)
+
+        def model_dump(self, mode: str = "json", exclude: set[str] | None = None) -> dict[str, Any]:
+            exclude = exclude or set()
+            annotations: dict[str, Any] = {}
+            for cls in reversed(type(self).__mro__):
+                annotations.update(getattr(cls, "__annotations__", {}))
+            return {
+                name: getattr(self, name)
+                for name in annotations
+                if name != "model_config" and name not in exclude and hasattr(self, name)
+            }
 
 from .change_protocol import ApplyChangesRequest
 from .isolated_manager import IsolatedExecutionManager
@@ -182,13 +233,13 @@ class GetXrefsInput(InstanceTargetInput):
         default="to",
         description="Whether to return xrefs to the target or from the target.",
     )
-    xref_kind: Literal["all", "code", "data"] = Field(
+    xref_kind: Literal["all", "code", "data", "flow"] = Field(
         default="all",
         description="Filter xrefs by kind.",
     )
     limit: int = Field(
         default=200,
-        ge=1,
+        ge=0,
         le=5000,
         description="Maximum number of cross references to return.",
     )
@@ -660,6 +711,8 @@ async def get_xrefs(params: GetXrefsInput) -> dict[str, Any]:
           and data refs to a symbol.
         - ``get_xrefs({"address": "0x401000", "direction": "from", "xref_kind": "code"})``
           returns outgoing code refs.
+        - ``get_xrefs({"address": "0x401000", "direction": "from", "xref_kind": "flow"})``
+          returns ordinary-flow refs only.
     """
     if not params.address and not params.name:
         return _tool_error("Provide either 'address' or 'name'.")
@@ -821,7 +874,13 @@ def main() -> None:
     if args.transport == "stdio":
         mcp.run()
     else:
-        mcp.run(transport="sse", port=args.port)
+        settings = getattr(mcp, "settings", None)
+        if settings is not None and hasattr(settings, "port"):
+            settings.port = args.port
+        try:
+            mcp.run(transport="sse", port=args.port)
+        except TypeError:
+            mcp.run(transport="sse")
 
 
 if __name__ == "__main__":

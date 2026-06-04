@@ -96,7 +96,9 @@ PLUGIN_NAME = "IDA-Script-MCP"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13338
 MAX_PORT_RANGE = 100
+MAX_FUNCTIONS_LIMIT = 5000
 MAX_DISASSEMBLY_LINES = 1000
+MAX_XREFS_LIMIT = 5000
 UNSAFE_GUI_EXECUTE_ENV = "IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE"
 
 INSTANCE_INFO_FILE = Path.home() / ".ida_script_mcp_instances.json"
@@ -104,6 +106,64 @@ INSTANCE_LOCK = threading.Lock()
 DATABASE_CHANGE_COUNT_BASELINE: int | None = None
 DATABASE_CHANGE_COUNT_BASELINE_ERROR: str | None = None
 DATABASE_MUTATED_BY_APPLY_CHANGES = False
+
+
+class RequestValidationError(ValueError):
+    """Raised when an HTTP request contains invalid structured parameters."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+
+
+def _coerce_int_param(
+    payload: dict[str, Any],
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    raw_value = payload.get(name, default)
+    if raw_value is None or raw_value == "":
+        raw_value = default
+    if isinstance(raw_value, bool):
+        raise RequestValidationError(name, f"{name} must be an integer")
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise RequestValidationError(name, f"{name} must be an integer") from exc
+    if minimum is not None and value < minimum:
+        raise RequestValidationError(name, f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise RequestValidationError(name, f"{name} must be <= {maximum}")
+    return value
+
+
+def _coerce_bool_param(payload: dict[str, Any], name: str, default: bool) -> bool:
+    raw_value = payload.get(name, default)
+    if raw_value is None or raw_value == "":
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(raw_value, int) and raw_value in (0, 1):
+        return bool(raw_value)
+    raise RequestValidationError(name, f"{name} must be a boolean")
+
+
+def _coerce_optional_str_param(payload: dict[str, Any], name: str) -> str | None:
+    raw_value = payload.get(name)
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, str):
+        raise RequestValidationError(name, f"{name} must be a string")
+    return raw_value
 
 
 def get_instance_id() -> str:
@@ -973,12 +1033,36 @@ def _xref_type_name(xref_type: int) -> str | None:
     return mapping.get(xref_type)
 
 
+def _xref_is_flow(xref_type: int) -> bool:
+    try:
+        import ida_xref
+    except Exception:
+        return _xref_type_name(xref_type) == "ordinary_flow"
+    return xref_type == getattr(ida_xref, "fl_F", None)
+
+
+def _normalize_xrefs_limit(value: Any) -> tuple[int, str | None, bool]:
+    if value is None or value == "":
+        return 200, None, False
+    if isinstance(value, bool):
+        return 0, f"Could not parse limit: {value!r}", False
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0, f"Could not parse limit: {value!r}", False
+    if parsed < 0:
+        return parsed, "limit must be greater than or equal to 0.", False
+    if parsed > MAX_XREFS_LIMIT:
+        return MAX_XREFS_LIMIT, None, True
+    return parsed, None, False
+
+
 def get_xrefs_data(
     address: str | None = None,
     name: str | None = None,
     direction: str = "to",
     xref_kind: str = "all",
-    limit: int = 200,
+    limit: Any = 200,
 ) -> dict[str, Any]:
     """Get cross references to or from an address or symbol."""
     result = _collect_database_info()
@@ -1001,6 +1085,13 @@ def get_xrefs_data(
     result["direction"] = direction
     result["xref_kind"] = xref_kind
 
+    effective_limit, limit_error, limit_clamped = _normalize_xrefs_limit(limit)
+    result["limit"] = effective_limit
+    result["limit_clamped"] = limit_clamped
+    if limit_error:
+        result.update({"error": limit_error, "returned": 0, "truncated": False, "xrefs": []})
+        return result
+
     try:
         import idautils
     except Exception as exc:
@@ -1010,7 +1101,7 @@ def get_xrefs_data(
     if direction not in {"to", "from"}:
         result.update({"error": f"Unsupported direction: {direction!r}", "xrefs": []})
         return result
-    if xref_kind not in {"all", "code", "data"}:
+    if xref_kind not in {"all", "code", "data", "flow"}:
         result.update({"error": f"Unsupported xref_kind: {xref_kind!r}", "xrefs": []})
         return result
 
@@ -1022,9 +1113,13 @@ def get_xrefs_data(
     truncated = False
     for xref in iterable:
         is_code = bool(getattr(xref, "iscode", 0))
+        xref_type = int(getattr(xref, "type", 0))
+        is_flow = _xref_is_flow(xref_type)
         if xref_kind == "code" and not is_code:
             continue
         if xref_kind == "data" and is_code:
+            continue
+        if xref_kind == "flow" and not is_flow:
             continue
 
         from_ea = int(getattr(xref, "frm", 0))
@@ -1034,7 +1129,7 @@ def get_xrefs_data(
         except Exception:
             source_disasm = ""
 
-        if len(xrefs) >= limit:
+        if len(xrefs) >= effective_limit:
             truncated = True
             break
 
@@ -1044,9 +1139,10 @@ def get_xrefs_data(
                 "to_ea": to_ea,
                 "from_name": _symbol_name(from_ea),
                 "to_name": _symbol_name(to_ea),
-                "type": int(getattr(xref, "type", 0)),
-                "type_name": _xref_type_name(int(getattr(xref, "type", 0))),
+                "type": xref_type,
+                "type_name": _xref_type_name(xref_type),
                 "is_code": is_code,
+                "is_flow": is_flow,
                 "user": bool(getattr(xref, "user", False)),
                 "source_disassembly": source_disasm,
             }
@@ -1321,6 +1417,48 @@ def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
     raise RuntimeError("; ".join(attempts) or "IDA byte patch APIs returned failure")
 
 
+def _read_current_bytes_hex(ea: int, size: int) -> str | None:
+    if size <= 0:
+        return ""
+    try:
+        import ida_bytes
+
+        getter = getattr(ida_bytes, "get_bytes", None)
+        if getter is not None:
+            data = getter(ea, size)
+            if data is not None:
+                return bytes(data).hex()
+    except Exception:
+        pass
+    try:
+        import idc
+
+        byte_getter = getattr(idc, "get_wide_byte", None)
+        if byte_getter is None:
+            return None
+        return bytes(int(byte_getter(ea + offset)) & 0xFF for offset in range(size)).hex()
+    except Exception:
+        return None
+
+
+def _validate_patch_old_bytes(ea: int, old_bytes_hex: str | None) -> None:
+    if not old_bytes_hex:
+        return
+    try:
+        expected = bytes.fromhex(old_bytes_hex).hex()
+    except ValueError as exc:
+        raise RuntimeError(f"old_bytes_hex is not valid hex: {old_bytes_hex!r}") from exc
+    actual = _read_current_bytes_hex(ea, len(expected) // 2)
+    if actual is None:
+        raise RuntimeError(
+            f"Could not read current bytes for old_bytes check at {hex(int(ea))}"
+        )
+    if actual.lower() != expected.lower():
+        raise RuntimeError(
+            f"old_bytes mismatch at {hex(int(ea))}: expected {expected}, found {actual}"
+        )
+
+
 def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
     op = operation.op
     try:
@@ -1342,6 +1480,7 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
                 raise RuntimeError(f"No function found for address {hex(int(operation.ea))}")
             ok = set_func_cmt(func, operation.text, int(operation.repeatable))
         elif op == "patch_bytes":
+            _validate_patch_old_bytes(operation.ea, operation.old_bytes_hex)
             ok = _patch_bytes_with_fallback(operation.ea, bytes.fromhex(operation.new_bytes_hex))
         elif op == "set_type":
             ok = _apply_type_with_fallback(operation.ea, operation.decl)
@@ -1537,16 +1676,41 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/functions":
+                try:
+                    offset = _coerce_int_param(request_data, "offset", 0, minimum=0)
+                    limit = _coerce_int_param(
+                        request_data,
+                        "limit",
+                        200,
+                        minimum=1,
+                        maximum=MAX_FUNCTIONS_LIMIT,
+                    )
+                    name_contains = _coerce_optional_str_param(request_data, "name_contains")
+                    segment = _coerce_optional_str_param(request_data, "segment")
+                    include_thunks = _coerce_bool_param(request_data, "include_thunks", False)
+                    include_library_functions = _coerce_bool_param(
+                        request_data, "include_library_functions", False
+                    )
+                except RequestValidationError as exc:
+                    self._send_json_response(
+                        400,
+                        {
+                            "status": "error",
+                            "field": exc.field,
+                            "error": str(exc),
+                            "instance_id": instance_registry.instance_id,
+                            "port": instance_registry.port,
+                        },
+                    )
+                    return
                 result = execute_on_main_thread(
                     list_functions_data,
-                    offset=int(request_data.get("offset", 0) or 0),
-                    limit=int(request_data.get("limit", 200) or 200),
-                    name_contains=request_data.get("name_contains"),
-                    segment=request_data.get("segment"),
-                    include_thunks=bool(request_data.get("include_thunks", False)),
-                    include_library_functions=bool(
-                        request_data.get("include_library_functions", False)
-                    ),
+                    offset=offset,
+                    limit=limit,
+                    name_contains=name_contains,
+                    segment=segment,
+                    include_thunks=include_thunks,
+                    include_library_functions=include_library_functions,
                     write=False,
                 )
                 self._send_json_response(200, result)
@@ -1581,7 +1745,7 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                     name=request_data.get("name"),
                     direction=str(request_data.get("direction", "to")),
                     xref_kind=str(request_data.get("xref_kind", "all")),
-                    limit=int(request_data.get("limit", 200) or 200),
+                    limit=request_data.get("limit", 200),
                     write=False,
                 )
                 self._send_json_response(200, result)

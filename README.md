@@ -102,8 +102,17 @@ py -3 -m pip install -e .
 
 ### Install the IDA plugin
 
+After installing the Python package, install the plugin into IDA's **per-user**
+plugin directory:
+
 ```powershell
 py -3 -m ida_script_mcp.installer install
+```
+
+Equivalent console-script form:
+
+```powershell
+ida-script-mcp-install install
 ```
 
 or with a supported MCP client configuration:
@@ -113,6 +122,13 @@ ida-script-mcp-install install codex
 ida-script-mcp-install install claude,codex,cursor
 ida-script-mcp-install install --project codex
 ida-script-mcp-install --list-clients
+```
+
+The installer chooses the IDA user directory automatically:
+
+```text
+Windows: %APPDATA%\Hex-Rays\IDA Pro
+macOS/Linux: ~/.idapro
 ```
 
 The current installer layout is:
@@ -126,7 +142,48 @@ The current installer layout is:
 <IDA user dir>/plugins/ida_script_mcp_support/change_recorder.py
 ```
 
-The installer and workflow payloads remove old root-level support files such as `ida_script_mcp_protocol.py`, because IDA scans root-level `plugins/*.py` files as plugin entrypoints.
+On a normal Windows IDA install this means files like:
+
+```text
+%APPDATA%\Hex-Rays\IDA Pro\plugins\ida_script_mcp.py
+%APPDATA%\Hex-Rays\IDA Pro\plugins\ida_script_mcp_support\protocol.py
+```
+
+The installer tries to use symlinks when possible and falls back to copying when
+symlinks are unavailable. It also removes old root-level support files such as
+`ida_script_mcp_protocol.py`, because IDA scans root-level `plugins/*.py` files
+as plugin entrypoints.
+
+Restart IDA after installation, then open a database and enable the plugin from
+**Edit -> Plugins -> IDA-Script-MCP**. The installer prints the same reminder:
+
+```text
+Installed IDA Pro plugin (IDA restart required)
+  To enable: Edit -> Plugins -> IDA-Script-MCP (Ctrl+Alt+S)
+```
+
+To uninstall the IDA plugin later:
+
+```powershell
+ida-script-mcp-install uninstall
+```
+
+If installation fails, check that you are using **IDA Pro** rather than IDA Free;
+IDA Free does not support plugins.
+
+Manual fallback: copy `src/ida_script_mcp/ida_plugin.py` to
+`<IDA user dir>/plugins/ida_script_mcp.py`, create
+`<IDA user dir>/plugins/ida_script_mcp_support/`, and copy these support files
+from `src/ida_script_mcp/` into that support package:
+
+```text
+protocol.py
+execution.py
+change_protocol.py
+change_recorder.py
+```
+
+Do **not** place those support files directly in the `plugins` root.
 
 ## Starting the plugin
 

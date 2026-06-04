@@ -211,6 +211,65 @@ def test_strict_install_missing_common_api_raises_and_restores_patches():
     assert recorder.operations == []
 
 
+def test_install_accepts_ida_83_settype_without_set_type_alias():
+    modules, calls, _names, _memory, _fake_tinfo = _fake_modules()
+    delattr(modules["idc"], "set_type")
+    recorder = ChangeRecorder()
+    recorder.install(modules)
+
+    try:
+        assert modules["idc"].SetType(BASE_EA, "int __cdecl main(void)") is True
+    finally:
+        recorder.uninstall()
+
+    assert calls[-1] == ("set_type", BASE_EA, "int __cdecl main(void)")
+    assert recorder.operations[0].op == "set_type"
+    assert recorder.operations[0].decl == "int __cdecl main(void)"
+    assert recorder.operations[0].source == "monkeypatch"
+
+
+def test_install_accepts_lowercase_set_type_without_settype_alias():
+    modules, calls, _names, _memory, _fake_tinfo = _fake_modules()
+    delattr(modules["idc"], "SetType")
+    recorder = ChangeRecorder()
+    recorder.install(modules)
+
+    try:
+        assert modules["idc"].set_type(BASE_EA, "int __cdecl main(void)") is True
+    finally:
+        recorder.uninstall()
+
+    assert calls[-1] == ("set_type", BASE_EA, "int __cdecl main(void)")
+    assert recorder.operations[0].op == "set_type"
+
+
+def test_install_requires_at_least_one_idc_type_alias():
+    modules, _calls, _names, _memory, _fake_tinfo = _fake_modules()
+    original = modules["idc"].set_name
+    delattr(modules["idc"], "SetType")
+    delattr(modules["idc"], "set_type")
+    recorder = ChangeRecorder()
+
+    with pytest.raises(RecorderError, match="idc.SetType/idc.set_type"):
+        recorder.install(modules)
+
+    assert modules["idc"].set_name is original
+    assert recorder.operations == []
+
+
+def test_explicit_mcp_changes_set_type_falls_back_to_settype_alias():
+    modules, calls, _names, _memory, _fake_tinfo = _fake_modules()
+    delattr(modules["idc"], "set_type")
+    recorder = ChangeRecorder()
+    api = McpChangesApi(recorder, modules)
+
+    assert api.set_type(BASE_EA, "int __cdecl entry(void)") is True
+
+    assert calls[-1] == ("set_type", BASE_EA, "int __cdecl entry(void)")
+    assert recorder.operations[0].op == "set_type"
+    assert recorder.operations[0].source == "explicit_api"
+
+
 def test_patch_byte_captures_old_bytes_before_write():
     modules, _calls, _names, memory, _fake_tinfo = _fake_modules()
     old_byte = bytes(memory[0:1]).hex()
