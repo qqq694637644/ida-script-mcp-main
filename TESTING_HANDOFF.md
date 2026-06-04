@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。现在建议从 `UNTESTED.md` 中 U005 多 IDA 实例选择开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U012 已由 workflow run `26926517859` 通过并移入 `TESTED.md`。现在仍建议从 `UNTESTED.md` 中编号靠前的 U005 多 IDA 实例选择开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 

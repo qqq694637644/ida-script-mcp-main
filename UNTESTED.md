@@ -6,16 +6,17 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003 和真实 MCP client smoke U004 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、以及 U012 set_type complex cases 已通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
 U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
 U004 real MCP client end-to-end
+U012 set_type complex cases
 ```
 
-下一轮建议从 U005 多 IDA 实例选择开始；也可以按风险优先选择 apply_changes 或 read-only endpoint corner cases。
+下一轮仍建议从编号靠前的 U005 多 IDA 实例选择开始；也可以按风险优先选择其他 apply_changes 或 read-only endpoint corner cases。
 
 ## MCP 层未测
 
@@ -115,20 +116,6 @@ U004 real MCP client end-to-end
   对非函数地址设置 function_comment
   对 thunk/library function 设置 comment
   同一地址重复覆盖 comment
-  ```
-
-- [ ] **U012 set_type 复杂情况**
-
-  ```text
-  非法 C declaration
-  复杂函数原型
-  stdcall/fastcall/thiscall/vectorcall
-  结构体/枚举/typedef 依赖
-  指针/数组/函数指针
-  已有类型覆盖
-  对非函数地址 set_type
-  ida_typeinf.apply_cdecl 失败路径
-  idc.set_type / idc.SetType fallback 各自真实路径
   ```
 
 - [ ] **U013 patch_bytes 复杂情况**

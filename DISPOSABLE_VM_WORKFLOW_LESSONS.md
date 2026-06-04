@@ -485,6 +485,9 @@ dedicated action/mode, not default full smoke
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26926180741` | `d764ecd...` | Failure | U012 first attempt proved worker generated 3 ordered `set_type` operations and invalid declaration failed correctly, but the test incorrectly assumed `set_type` at `ea=1` must fail while clean IDA 8.3 accepted it. |
+| `26926363238` | `56051ef...` | Failure | U012 second attempt proved dry-run and destructive replay applied all 3 operations, but the post-apply non-function probe was correctly rejected because the GUI database was dirty. |
+| `26926517859` | `5bc828b...` | Success | U012 set_type complex cases passed; artifact `7401637998`. |
 
 ## Current conclusion
 
@@ -496,9 +499,9 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, and U004 real MCP client transport/tool-result flow are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, and U012 worker-generated `set_type` complex replay are now verified separately.
 
-The remaining backlog starts after U004. Next likely areas are:
+U012 was completed out of order. The lowest-numbered remaining backlog still starts at U005. Next likely areas are:
 
 ```text
 U005 multi-IDA instance selection
