@@ -344,10 +344,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         return best_code_segment_non_code
 
 
-    def _u009_select_unmapped_address(ida_segment_module):
+    def _u009_select_unmapped_address(ida_bytes_module, ida_segment_module):
         first_seg = getattr(ida_segment_module, "get_first_seg", None)
         next_seg = getattr(ida_segment_module, "get_next_seg", None)
         getseg = getattr(ida_segment_module, "getseg", None)
+        is_mapped = getattr(ida_bytes_module, "is_mapped", None)
         max_end = 0
         if first_seg is not None and next_seg is not None:
             seg = first_seg()
@@ -360,17 +361,37 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 visited.add(start_ea)
                 max_end = max(max_end, end_ea)
                 seg = next_seg(start_ea)
-        candidate = max_end + 0x1000 if max_end else 0x70000000
-        if getseg is None:
-            return candidate
-        for _ in range(32):
+
+        candidates = []
+        if max_end:
+            candidates.extend(max_end + delta for delta in (0x100000, 0x1000000, 0x10000000, 0x100000000))
+        candidates.extend((0x700000000000, 0x7FFF00000000, 0x1000000000000, 0x4000000000000000))
+
+        badaddr = int(getattr(__import__("idaapi"), "BADADDR", 0xFFFFFFFFFFFFFFFF))
+        fallback = candidates[0]
+        for candidate in candidates:
+            if candidate <= 0 or candidate >= badaddr:
+                continue
+            fallback = candidate
+            if getseg is not None:
+                try:
+                    if getseg(candidate) is not None:
+                        continue
+                except Exception:
+                    pass
+            if is_mapped is not None:
+                try:
+                    if is_mapped(candidate):
+                        continue
+                except Exception:
+                    pass
             try:
-                if getseg(candidate) is None:
-                    return candidate
+                data = ida_bytes_module.get_bytes(candidate, 1)
             except Exception:
                 return candidate
-            candidate += 0x100000
-        return candidate
+            if data is None or data == b"" or data == "":
+                return candidate
+        return fallback
 
 
     def _u009_set_type(idc_module, ea, decl):
@@ -400,7 +421,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         function_end_ea = int(getattr(func, "end_ea", target_ea) or target_ea)
         middle_ea, middle_head_ea, middle_item_end_ea = _u009_select_instruction_middle(ida_bytes, func)
         data_ea = _u009_select_data_address(ida_bytes, ida_segment)
-        unmapped_ea = _u009_select_unmapped_address(ida_segment)
+        unmapped_ea = _u009_select_unmapped_address(ida_bytes, ida_segment)
 
         run_id = str(int(time.time()))
         requested_unicode_name = f"u009_名前_测试_{run_id}"
