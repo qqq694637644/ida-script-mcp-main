@@ -28,6 +28,13 @@ RUNTIME_PACKAGE_FILES = (
     "change_recorder.py",
     "process_utils.py",
 )
+USER_SCRIPT_FILES = (
+    "worker_chain_user_script.py",
+    "worker_timeout_user_script.py",
+    "worker_crash_user_script.py",
+    "worker_result_missing_user_script.py",
+    "worker_recorder_error_user_script.py",
+)
 
 
 def _package_source_dir(source_root: Path | None = None) -> Path:
@@ -53,6 +60,21 @@ def _read_runtime_package_files(source_root: Path | None = None) -> dict[str, by
     if missing:
         raise FileNotFoundError("Missing runtime package source files: " + ", ".join(missing))
     return payload
+
+
+def _read_user_script_files() -> dict[str, bytes]:
+    payload_dir = _payload_source_dir()
+    files: dict[str, bytes] = {}
+    missing: list[str] = []
+    for relative_name in USER_SCRIPT_FILES:
+        source_path = payload_dir / relative_name
+        if not source_path.is_file():
+            missing.append(str(source_path))
+            continue
+        files[relative_name] = source_path.read_bytes()
+    if missing:
+        raise FileNotFoundError("Missing worker user script files: " + ", ".join(missing))
+    return files
 
 
 def _b64_map(files: dict[str, bytes]) -> dict[str, str]:
@@ -82,6 +104,7 @@ def build_guest_ida_worker_chain_test_script(
     user_script_name_by_mode = {
         "worker_chain": "worker_chain_user_script.py",
         "worker_timeout": "worker_timeout_user_script.py",
+        "worker_failure_matrix": "worker_crash_user_script.py",
     }
     try:
         user_script_name = user_script_name_by_mode[test_mode]
@@ -90,9 +113,10 @@ def build_guest_ida_worker_chain_test_script(
 
     install_files = _read_install_files(source_root)
     runtime_files = _read_runtime_package_files(source_root)
-    user_script_path = _payload_source_dir() / user_script_name
+    user_scripts = _read_user_script_files()
+    if user_script_name not in user_scripts:
+        raise FileNotFoundError(f"Missing user script for {test_mode}: {user_script_name}")
     template_path = _payload_source_dir() / "guest_worker_chain_payload.py"
-    user_script = user_script_path.read_bytes()
     script = template_path.read_text(encoding="utf-8")
 
     replacements = {
@@ -107,8 +131,8 @@ def build_guest_ida_worker_chain_test_script(
         '"__PLUGIN_EXPECTED_SHA256_JSON__"': json.dumps(_sha256_map(install_files), ensure_ascii=False),
         '"__RUNTIME_FILES_B64_JSON__"': json.dumps(_b64_map(runtime_files), ensure_ascii=False),
         '"__RUNTIME_EXPECTED_SHA256_JSON__"': json.dumps(_sha256_map(runtime_files), ensure_ascii=False),
-        '"__USER_SCRIPT_B64_JSON__"': json.dumps(base64.b64encode(user_script).decode("ascii")),
-        '"__USER_SCRIPT_SHA256_JSON__"': json.dumps(hashlib.sha256(user_script).hexdigest()),
+        '"__USER_SCRIPT_B64_JSON__"': json.dumps(_b64_map(user_scripts), ensure_ascii=False),
+        '"__USER_SCRIPT_SHA256_JSON__"': json.dumps(_sha256_map(user_scripts), ensure_ascii=False),
     }
     for placeholder, value in replacements.items():
         script = script.replace(placeholder, value)
@@ -140,7 +164,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--test-mode",
         default="worker_chain",
-        choices=["worker_chain", "worker_timeout"],
+        choices=["worker_chain", "worker_timeout", "worker_failure_matrix"],
     )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)

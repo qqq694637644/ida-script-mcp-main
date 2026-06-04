@@ -26,7 +26,7 @@ PLUGIN_FILES_B64 = "__PLUGIN_FILES_B64_JSON__"
 PLUGIN_EXPECTED_SHA256 = "__PLUGIN_EXPECTED_SHA256_JSON__"
 RUNTIME_FILES_B64 = "__RUNTIME_FILES_B64_JSON__"
 RUNTIME_EXPECTED_SHA256 = "__RUNTIME_EXPECTED_SHA256_JSON__"
-USER_SCRIPT_B64 = "__USER_SCRIPT_B64_JSON__"
+USER_SCRIPTS_B64 = "__USER_SCRIPT_B64_JSON__"
 USER_SCRIPT_SHA256 = "__USER_SCRIPT_SHA256_JSON__"
 WORK_DIR = Path(tempfile.mkdtemp(prefix="ida-script-mcp-worker-chain-"))
 READY_PATH = WORK_DIR / "ida_ready.json"
@@ -284,15 +284,21 @@ def _install_runtime_package_files() -> Path:
     return runtime_root
 
 
-def _write_worker_user_script() -> Path:
-    user_script = WORK_DIR / USER_SCRIPT_FILENAME
-    content = base64.b64decode(USER_SCRIPT_B64.encode("ascii"))
-    _write_bytes_atomic(user_script, content)
-    digest = _sha256(user_script)
-    if digest != USER_SCRIPT_SHA256:
-        raise RuntimeError("SHA-256 mismatch for worker user script")
-    py_compile.compile(str(user_script), doraise=True)
-    return user_script
+def _write_worker_user_scripts() -> dict[str, Path]:
+    scripts: dict[str, Path] = {}
+    for filename, encoded in USER_SCRIPTS_B64.items():
+        user_script = WORK_DIR / filename
+        content = base64.b64decode(encoded.encode("ascii"))
+        _write_bytes_atomic(user_script, content)
+        digest = _sha256(user_script)
+        expected_digest = USER_SCRIPT_SHA256[filename]
+        if digest != expected_digest:
+            raise RuntimeError(f"SHA-256 mismatch for worker user script {filename}")
+        py_compile.compile(str(user_script), doraise=True)
+        scripts[filename] = user_script
+    if USER_SCRIPT_FILENAME not in scripts:
+        raise RuntimeError(f"Primary worker user script is missing: {USER_SCRIPT_FILENAME}")
+    return scripts
 
 
 def _select_ida_executable(ida_dir: Path) -> Path:
@@ -744,6 +750,224 @@ def _run_worker_timeout(
                 os.environ[key] = value
 
 
+def _run_worker_failure_matrix(
+    ready: dict,
+    base_url: str,
+    ida_dir: Path,
+    user_scripts: dict[str, Path],
+    result: dict,
+) -> None:
+    health = _health_with_retry(base_url)
+    result["responses"]["health"] = health["body"]
+    _check(result, "health reports plugin name", health["body"].get("plugin") == "IDA-Script-MCP", health["body"])
+
+    metadata_before = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+    result["responses"]["metadata_before"] = metadata_before["body"]
+    _check(
+        result,
+        "metadata clean before failure matrix",
+        metadata_before["body"].get("dirty_state_known") is True and metadata_before["body"].get("dirty") is False,
+        metadata_before["body"],
+    )
+
+    functions_page = _json_request(
+        "POST",
+        base_url,
+        "/functions",
+        {"offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True},
+        expected_status=200,
+        timeout=10,
+    )
+    functions = functions_page["body"].get("functions") or []
+    _check(result, "failure matrix has target function", bool(functions), functions_page["body"])
+    target_ea = int(functions[0]["start_ea"])
+    target_hex = hex(target_ea)
+
+    runtime_root = _install_runtime_package_files()
+    worker_ida = _select_worker_ida_executable(ida_dir)
+    worker_jobs = WORK_DIR / "worker_failure_matrix_jobs"
+    matrix: dict[str, dict] = {}
+    result["worker_failure_matrix"] = matrix
+
+    def _execute_case(
+        case_id: str,
+        script_path: Path,
+        *,
+        expected_status: str,
+        timeout_seconds: int = 30,
+        ida_path: Path | None = None,
+        extra_env: dict[str, str] | None = None,
+    ) -> dict:
+        env_keys = [
+            "IDA_SCRIPT_MCP_IDA_PATH",
+            "IDA_SCRIPT_MCP_WORK_DIR",
+            "IDA_SCRIPT_MCP_KEEP_JOBS",
+            "IDA_SCRIPT_MCP_WORKER_FAILURE_TARGET_EA",
+        ]
+        extra_env = extra_env or {}
+        env_keys.extend(extra_env)
+        previous_env = {key: os.environ.get(key) for key in env_keys}
+        os.environ["IDA_SCRIPT_MCP_IDA_PATH"] = str(ida_path or worker_ida)
+        os.environ["IDA_SCRIPT_MCP_WORK_DIR"] = str(worker_jobs)
+        os.environ["IDA_SCRIPT_MCP_KEEP_JOBS"] = "1"
+        os.environ["IDA_SCRIPT_MCP_WORKER_FAILURE_TARGET_EA"] = target_hex
+        for key, value in extra_env.items():
+            os.environ[key] = value
+        try:
+            import asyncio
+            from ida_script_mcp import server as mcp_server
+
+            class ExecuteParams:
+                instance_id = None
+                port = int(ready["port"])
+                code = None
+                script_path = str(script_path)
+                capture_output = True
+                timeout_seconds = int(timeout_seconds)
+                collect_changes = True
+
+                def to_execute_request(self):
+                    return mcp_server.ExecuteRequest.model_validate(
+                        {
+                            "code": self.code,
+                            "script_path": self.script_path,
+                            "capture_output": self.capture_output,
+                            "timeout_seconds": self.timeout_seconds,
+                        }
+                    )
+
+            _stage(
+                "worker_failure_case_start",
+                {"case": case_id, "expected_status": expected_status, "script_path": str(script_path)},
+            )
+            execute_result = asyncio.run(mcp_server.execute_idapython(ExecuteParams()))
+            matrix[case_id] = {
+                "passed": execute_result.get("status") == expected_status,
+                "expected_status": expected_status,
+                "actual_status": execute_result.get("status"),
+                "error_type": (execute_result.get("error") or {}).get("type") if isinstance(execute_result.get("error"), dict) else None,
+                "worker_pid": execute_result.get("worker_pid"),
+                "worker_exit_code": execute_result.get("worker_exit_code"),
+                "job_id": execute_result.get("job_id"),
+            }
+            result["responses"][f"failure_matrix_{case_id}"] = execute_result
+            _check(
+                result,
+                f"failure matrix {case_id} status",
+                execute_result.get("status") == expected_status,
+                execute_result,
+            )
+            _stage(
+                "worker_failure_case_done",
+                {"case": case_id, "status": execute_result.get("status"), "worker_exit_code": execute_result.get("worker_exit_code")},
+            )
+            return execute_result
+        finally:
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    bad_worker_ida = WORK_DIR / "missing-idat64.exe"
+    start_error = _execute_case(
+        "worker_start_error",
+        user_scripts["worker_crash_user_script.py"],
+        expected_status="worker_start_error",
+        ida_path=bad_worker_ida,
+    )
+    _check(result, "worker_start_error did not launch worker", start_error.get("worker_pid") is None, start_error)
+
+    source_error = _execute_case(
+        "source_error",
+        WORK_DIR / "missing_source_for_u003.py",
+        expected_status="source_error",
+    )
+    _check(result, "source_error has worker pid", source_error.get("worker_pid") is not None, source_error)
+
+    crashed = _execute_case(
+        "worker_crashed",
+        user_scripts["worker_crash_user_script.py"],
+        expected_status="worker_crashed",
+    )
+    _check(result, "worker_crashed has nonzero exit", crashed.get("worker_exit_code") not in (None, 0), crashed)
+
+    missing = _execute_case(
+        "worker_result_missing",
+        user_scripts["worker_result_missing_user_script.py"],
+        expected_status="worker_result_missing",
+    )
+    _check(result, "worker_result_missing has zero exit", missing.get("worker_exit_code") == 0, missing)
+
+    recorder = _execute_case(
+        "recorder_error",
+        user_scripts["worker_recorder_error_user_script.py"],
+        expected_status="recorder_error",
+    )
+    _check(result, "recorder_error has RecorderError", (recorder.get("error") or {}).get("type") == "RecorderError", recorder)
+
+    dirty_payload = {
+        "schema_version": 1,
+        "job_id": "u003-dirty-rejected",
+        "database_fingerprint": {
+            "input_file_path": metadata_before["body"].get("input_file_path"),
+            "database_path": metadata_before["body"].get("database_path"),
+            "root_filename": metadata_before["body"].get("root_filename") or metadata_before["body"].get("database"),
+            "imagebase": metadata_before["body"].get("imagebase"),
+            "input_md5": metadata_before["body"].get("input_md5"),
+            "input_sha256": metadata_before["body"].get("input_sha256"),
+            "processor": metadata_before["body"].get("processor"),
+            "bitness": metadata_before["body"].get("bitness"),
+            "database_sha256": metadata_before["body"].get("database_sha256"),
+            "database_size": metadata_before["body"].get("database_size"),
+        },
+        "operations": [
+            {
+                "op_id": "op-000001",
+                "op": "comment",
+                "ea": target_ea,
+                "source": "explicit_api",
+                "confidence": "high",
+                "text": "u003 dirty marker before rejected execute",
+                "repeatable": False,
+            }
+        ],
+        "dry_run": False,
+    }
+    dirty_apply = _json_request(
+        "POST",
+        base_url,
+        "/apply_changes",
+        dirty_payload,
+        expected_status=200,
+        timeout=10,
+    )
+    result["responses"]["failure_matrix_dirty_apply"] = dirty_apply["body"]
+    _check(result, "dirty apply succeeded before rejected case", dirty_apply["body"].get("status") == "ok", dirty_apply["body"])
+    metadata_dirty = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
+    result["responses"]["failure_matrix_metadata_dirty"] = metadata_dirty["body"]
+    _check(result, "metadata dirty before rejected case", metadata_dirty["body"].get("dirty") is True, metadata_dirty["body"])
+
+    rejected = _execute_case(
+        "rejected",
+        user_scripts["worker_crash_user_script.py"],
+        expected_status="rejected",
+    )
+    _check(result, "rejected did not launch worker", rejected.get("worker_pid") is None, rejected)
+
+    expected_cases = {
+        "worker_start_error",
+        "source_error",
+        "worker_crashed",
+        "worker_result_missing",
+        "recorder_error",
+        "rejected",
+    }
+    _check(result, "failure matrix contains all cases", set(matrix) == expected_cases, matrix)
+    _check(result, "failure matrix all passed", all(item.get("passed") for item in matrix.values()), matrix)
+    _stage("worker_failure_matrix_done", matrix)
+
+
 def _read_process_pipes(process: subprocess.Popen) -> tuple[str, str]:
     try:
         stdout, stderr = process.communicate(timeout=10)
@@ -768,7 +992,8 @@ def main() -> int:
             raise RuntimeError(f"DLL path does not exist: {dll_path}")
 
         plugin_dir = _install_plugin_files()
-        user_script = _write_worker_user_script()
+        user_scripts = _write_worker_user_scripts()
+        user_script = user_scripts[USER_SCRIPT_FILENAME]
         ida_executable = _select_ida_executable(ida_dir)
         database_path = WORK_DIR / (dll_path.stem + ".i64")
         bootstrap_path = _write_bootstrap(WORK_DIR, plugin_dir, READY_PATH, HEARTBEAT_PATH)
@@ -797,6 +1022,8 @@ def main() -> int:
         result["ready"] = ready
         if TEST_MODE == "worker_timeout":
             _run_worker_timeout(ready, str(ready["base_url"]), ida_dir, user_script, result)
+        elif TEST_MODE == "worker_failure_matrix":
+            _run_worker_failure_matrix(ready, str(ready["base_url"]), ida_dir, user_scripts, result)
         elif TEST_MODE == "worker_chain":
             _run_worker_chain(ready, str(ready["base_url"]), ida_dir, user_script, result)
         else:

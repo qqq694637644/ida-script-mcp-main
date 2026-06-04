@@ -134,6 +134,29 @@ def test_build_guest_ida_worker_timeout_test_script_contains_checked_sources() -
     compile(script, "<generated_worker_timeout_payload>", "exec")
 
 
+def test_build_guest_ida_worker_failure_matrix_script_contains_checked_sources() -> None:
+    script = build_guest_ida_worker_chain_test_script(test_mode="worker_failure_matrix")
+
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in script
+    assert "WORKER_CHAIN_STAGE=" in script
+    assert 'TEST_MODE = "worker_failure_matrix"' in script
+    assert "worker_crash_user_script.py" in script
+    assert "worker_result_missing_user_script.py" in script
+    assert "worker_recorder_error_user_script.py" in script
+    assert "worker_failure_case_start" in script
+    assert "worker_failure_matrix_done" in script
+    assert "worker_start_error" in script
+    assert "worker_crashed" in script
+    assert "worker_result_missing" in script
+    assert "recorder_error" in script
+    assert "source_error" in script
+    assert "rejected" in script
+    assert "__TEST_MODE_JSON__" not in script
+    assert "__USER_SCRIPT_FILENAME_JSON__" not in script
+    assert "__USER_SCRIPT_B64_JSON__" not in script
+    compile(script, "<generated_worker_failure_matrix_payload>", "exec")
+
+
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workflow_path = (
@@ -156,6 +179,18 @@ def test_disposable_vm_workflow_exposes_worker_timeout_action() -> None:
     assert "ida_plugin_worker_timeout_test" in workflow
     assert "ida_plugin_worker_timeout_test_payload.py" in workflow
     assert "--test-mode worker_timeout" in workflow
+
+
+def test_disposable_vm_workflow_exposes_worker_failure_matrix_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_worker_failure_matrix_test" in workflow
+    assert "ida_plugin_worker_failure_matrix_test_payload.py" in workflow
+    assert "--test-mode worker_failure_matrix" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
@@ -270,5 +305,32 @@ def test_generated_worker_timeout_payload_reports_missing_ida_dir(tmp_path) -> N
     assert result.returncode == 1
     assert "IDA_WORKER_CHAIN_TEST_RESULT=" in result.stdout
     assert '"mode": "worker_timeout"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_worker_failure_matrix_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "worker_failure_matrix_payload.py"
+    script_path.write_text(
+        build_guest_ida_worker_chain_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+            test_mode="worker_failure_matrix",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in result.stdout
+    assert '"mode": "worker_failure_matrix"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "validate_inputs_start" in result.stdout
