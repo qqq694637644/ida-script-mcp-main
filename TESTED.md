@@ -798,6 +798,7 @@ Notes:
 Evidence:
 
 - Workflow run: `26926339324`, attempt `1`
+- Clean merge verification run: `26927733105`, artifact `7402019349`, commit `fd9705fed2cbfa0cadb7013cbbe783822a3c7f5d`
 - Workflow: `Disposable VM guest agent smoke`
 - Branch / commit: `gpt/test-u008-xrefs-corner-case-20260604-1c85e4` / `af1425208d0ce1123c1d6cf3a5372199856ee7d2`
 - Job: `Host controller and guest agent smoke`
@@ -853,6 +854,7 @@ Implementation notes:
 - U008 payload source is checked in as `src/ida_script_mcp/payload/U008_xrefs_corner_cases.py`.
 - The builder is `src/ida_script_mcp/payload/ida_u008_xrefs_corner_case_test.py`.
 - The run also verified the new `/xrefs` `flow` filter and structured direct-HTTP limit handling for `0`, negative, non-integer, and oversized limits.
+- PR #13 re-verified the same U008 payload on a clean merge branch using workflow run `26927733105`, artifact `7402019349`; this merge keeps U008 in `TESTED.md` while preserving later completed U011/U012/U013 records from the handoff tracker.
 
 ## 2026-06-04 U013：patch_bytes complex cases
 

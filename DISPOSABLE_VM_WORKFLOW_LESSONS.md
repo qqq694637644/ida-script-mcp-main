@@ -675,6 +675,7 @@ Rule:
 | `26926363238` | `56051ef...` | Failure | U012 second attempt proved dry-run and destructive replay applied all 3 operations, but the post-apply non-function probe was correctly rejected because the GUI database was dirty. |
 | `26926517859` | `5bc828b...` | Success | U012 set_type complex cases passed before handoff-doc migration; artifact `7401637998`. |
 | `26927371932` | `d59cc0c...` | Success | U012 set_type complex cases passed again after moving U012 into tested/handoff docs; artifact `7401910040`. |
+| `26927733105` | `fd9705f...` | Success | U008 `/xrefs` clean merge verification passed on PR #13 branch; artifact `7402019349`. |
 
 ## Current conclusion
 
