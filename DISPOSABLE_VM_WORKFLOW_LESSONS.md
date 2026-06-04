@@ -62,6 +62,7 @@ restore_extra_args_json=[]
 | U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
 | U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
 | U006 `/functions` corner cases | Passed | `26925694907`, artifact `7401369820` |
+| U011 comment/function_comment complex cases | Passed | `26926598576`, artifact `7401657997` |
 | U013 patch_bytes complex cases | Passed | `26926417574`, artifact `7401627652` |
 
 ### Final full-smoke coverage
@@ -280,6 +281,30 @@ artifact=disposable-vm-guest-agent-smoke / 7401627652
 ```
 
 This verifies the most important `patch_bytes` replay edge cases and adds explicit `old_bytes_hex` checking before mutation.
+
+Run `26926598576` closed U011, the comment/function_comment complex-case test:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u011_comment_function_comment_complex
+payload status=passed
+dry-run status=ok applied=[] errors=[] skipped=11
+destructive apply status=partial applied=10 errors=1
+expected error op=op-function-comment-non-function message="No function found for address 0x7fffffffffff"
+repeatable regular comment persisted
+cleared regular comment persisted as null
+long comment exact length=993 persisted
+Unicode comment persisted with CJK/Japanese/Cyrillic/Arabic/lambda/emoji
+function_comment and repeatable_function_comment persisted
+thunk/library regular comment persisted on RegQueryValueExW
+same-address overwrite kept the second value
+metadata_after_apply.dirty=true
+artifact=disposable-vm-guest-agent-smoke / 7401657997
+```
+
+This verified comment/function_comment replay semantics in a disposable temporary IDB.
 
 ## Failure lessons and fixes
 
@@ -588,6 +613,27 @@ assertions on dirty state and database identity
 dedicated action/mode, not default full smoke
 ```
 
+### Console markers must be ASCII and bounded
+
+Observed during U011:
+
+```text
+Run 26926069955: U011 reached destructive apply, but final stdout failed under the guest GBK console when the JSON marker contained Arabic/emoji text.
+Run 26926193824: ensure_ascii=True avoided the encoding crash, but printing full endpoint responses made result.json stdout_tail start inside a huge response body and hid the useful failure context.
+Run 26926598576: compact console result plus bounded long-comment assertion passed on the latest pre-merge PR head.
+```
+
+Fix:
+
+- Use `json.dumps(..., ensure_ascii=True)` for stdout/stderr markers from guest payloads that contain Unicode.
+- Keep full UTF-8 JSON files for local debugging when useful, but print a compact marker to stdout with `failed_check`, clipped strings/lists, and selected response summaries.
+- For long comment coverage, keep the default assertion within the known reliable range unless the test is explicitly about IDA's maximum comment length.
+
+Rule:
+
+- Artifact `result.json` usually only exposes the guest process stdout/stderr tail. Do not rely on huge final JSON blobs for diagnostics.
+- Every destructive payload should print a bounded, machine-readable final marker that still includes the failed assertion.
+
 ## Run index
 
 | Run | Commit | Result | Note |
@@ -620,6 +666,9 @@ dedicated action/mode, not default full smoke
 | `26926227804` | `1638fab...` | Failure | U009 high unmapped address still returned `ff` fill; assertion contract needed to allow all-ff bytes with no metadata. |
 | `26926388631` | `d1a0cde...` | Success | U009 /inspect_address system test passed; artifact `7401596027`. |
 | `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
+| `26926069955` | `5a7272f...` | Failure | U011 core apply path reached expected partial apply, but Unicode final JSON crashed on the guest GBK stdout. |
+| `26926193824` | `8c1f617...` | Failure | U011 avoided the encoding crash, but full stdout JSON hid the failed assertion behind large response bodies. |
+| `26926598576` | `0ad9f93...` | Success | U011 comment/function_comment complex passed; artifact `7401657997`. |
 | `26926417574` | `ac7cbab...` | Success | U013 patch_bytes complex cases passed; artifact `7401627652`. |
 
 ## Current conclusion
@@ -632,12 +681,12 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U009 `/inspect_address` system behavior, and U013 patch_bytes complex cases are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U009 `/inspect_address` system behavior, U011 comment/function_comment complex cases, and U013 patch_bytes complex cases are now verified separately.
 
-The remaining backlog after U013 includes:
+The remaining backlog after U011/U013 includes:
 
 ```text
-U010/U011/U012/U014 apply_changes corner cases
+U010/U012/U014 apply_changes corner cases
 U006R fixture-dependent `/functions` residuals
 read-only endpoint corner cases
 installer/client config coverage
