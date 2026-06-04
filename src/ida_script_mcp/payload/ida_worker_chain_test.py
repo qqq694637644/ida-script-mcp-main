@@ -34,6 +34,7 @@ USER_SCRIPT_FILES = (
     "worker_crash_user_script.py",
     "worker_result_missing_user_script.py",
     "worker_recorder_error_user_script.py",
+    "u012_set_type_complex_worker_script.py",
 )
 
 
@@ -105,6 +106,7 @@ def build_guest_ida_worker_chain_test_script(
         "worker_chain": "worker_chain_user_script.py",
         "worker_timeout": "worker_timeout_user_script.py",
         "worker_failure_matrix": "worker_crash_user_script.py",
+        "u012_set_type_complex": "u012_set_type_complex_worker_script.py",
     }
     try:
         user_script_name = user_script_name_by_mode[test_mode]
@@ -164,7 +166,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--test-mode",
         default="worker_chain",
-        choices=["worker_chain", "worker_timeout", "worker_failure_matrix"],
+        choices=[
+            "worker_chain",
+            "worker_timeout",
+            "worker_failure_matrix",
+            "u012_set_type_complex",
+        ],
     )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
