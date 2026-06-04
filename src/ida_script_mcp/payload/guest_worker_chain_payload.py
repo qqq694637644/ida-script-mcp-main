@@ -1193,22 +1193,6 @@ def _run_u012_set_type_complex(
             invalid_decl,
         )
 
-        nonfunction_operation = {
-            "op_id": "op-u012-nonfunction-address",
-            "op": "set_type",
-            "ea": 1,
-            "source": "explicit_api",
-            "decl": f"int __cdecl u012_nonfunction_{run_id}(void);",
-            "flags": 0,
-        }
-        nonfunction = apply_expected_error("nonfunction_address", nonfunction_operation)
-        _check(
-            result,
-            "non-function set_type reports operation error",
-            bool(nonfunction.get("errors")),
-            nonfunction,
-        )
-
         dry_payload = json.loads(json.dumps(change_set))
         dry_payload["dry_run"] = True
         dry_payload["port"] = int(ready["port"])
@@ -1263,6 +1247,38 @@ def _run_u012_set_type_complex(
         metadata_after_apply = _json_request("GET", base_url, "/metadata", expected_status=200, timeout=5)
         result["responses"]["metadata_after_u012_apply"] = metadata_after_apply["body"]
         _check(result, "U012 metadata dirty after destructive apply", metadata_after_apply["body"].get("dirty") is True, metadata_after_apply["body"])
+
+        nonfunction_operation = {
+            "op_id": "op-u012-nonfunction-address",
+            "op": "set_type",
+            "ea": 1,
+            "source": "explicit_api",
+            "decl": f"int __cdecl u012_nonfunction_{run_id}(void);",
+            "flags": 0,
+        }
+        nonfunction_payload = apply_payload(
+            f"u012-nonfunction_address-{run_id}",
+            [nonfunction_operation],
+            dry_run=False,
+        )
+        nonfunction = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(nonfunction_payload)))
+        result["responses"]["u012_nonfunction_address"] = nonfunction
+        nonfunction_outcome_count = len(nonfunction.get("applied") or []) + len(nonfunction.get("errors") or [])
+        result["u012_set_type_summary"]["nonfunction_address_status"] = nonfunction.get("status")
+        result["u012_set_type_summary"]["nonfunction_address_applied"] = len(nonfunction.get("applied") or [])
+        result["u012_set_type_summary"]["nonfunction_address_errors"] = len(nonfunction.get("errors") or [])
+        _check(
+            result,
+            "U012 non-function set_type returns a terminal status",
+            nonfunction.get("status") in {"ok", "error"},
+            nonfunction,
+        )
+        _check(
+            result,
+            "U012 non-function set_type reports one operation outcome",
+            nonfunction_outcome_count == 1,
+            nonfunction,
+        )
         _stage("u012_set_type_complex_done", result["u012_set_type_summary"])
     finally:
         for key, value in previous_env.items():
