@@ -96,6 +96,7 @@ PLUGIN_NAME = "IDA-Script-MCP"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13338
 MAX_PORT_RANGE = 100
+MAX_FUNCTIONS_LIMIT = 5000
 MAX_DISASSEMBLY_LINES = 1000
 UNSAFE_GUI_EXECUTE_ENV = "IDA_SCRIPT_MCP_ENABLE_UNSAFE_GUI_EXECUTE"
 
@@ -104,6 +105,64 @@ INSTANCE_LOCK = threading.Lock()
 DATABASE_CHANGE_COUNT_BASELINE: int | None = None
 DATABASE_CHANGE_COUNT_BASELINE_ERROR: str | None = None
 DATABASE_MUTATED_BY_APPLY_CHANGES = False
+
+
+class RequestValidationError(ValueError):
+    """Raised when an HTTP request contains invalid structured parameters."""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+
+
+def _coerce_int_param(
+    payload: dict[str, Any],
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    raw_value = payload.get(name, default)
+    if raw_value is None or raw_value == "":
+        raw_value = default
+    if isinstance(raw_value, bool):
+        raise RequestValidationError(name, f"{name} must be an integer")
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise RequestValidationError(name, f"{name} must be an integer") from exc
+    if minimum is not None and value < minimum:
+        raise RequestValidationError(name, f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise RequestValidationError(name, f"{name} must be <= {maximum}")
+    return value
+
+
+def _coerce_bool_param(payload: dict[str, Any], name: str, default: bool) -> bool:
+    raw_value = payload.get(name, default)
+    if raw_value is None or raw_value == "":
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(raw_value, int) and raw_value in (0, 1):
+        return bool(raw_value)
+    raise RequestValidationError(name, f"{name} must be a boolean")
+
+
+def _coerce_optional_str_param(payload: dict[str, Any], name: str) -> str | None:
+    raw_value = payload.get(name)
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, str):
+        raise RequestValidationError(name, f"{name} must be a string")
+    return raw_value
 
 
 def get_instance_id() -> str:
@@ -1580,16 +1639,41 @@ class IdaScriptHttpHandler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/functions":
+                try:
+                    offset = _coerce_int_param(request_data, "offset", 0, minimum=0)
+                    limit = _coerce_int_param(
+                        request_data,
+                        "limit",
+                        200,
+                        minimum=1,
+                        maximum=MAX_FUNCTIONS_LIMIT,
+                    )
+                    name_contains = _coerce_optional_str_param(request_data, "name_contains")
+                    segment = _coerce_optional_str_param(request_data, "segment")
+                    include_thunks = _coerce_bool_param(request_data, "include_thunks", False)
+                    include_library_functions = _coerce_bool_param(
+                        request_data, "include_library_functions", False
+                    )
+                except RequestValidationError as exc:
+                    self._send_json_response(
+                        400,
+                        {
+                            "status": "error",
+                            "field": exc.field,
+                            "error": str(exc),
+                            "instance_id": instance_registry.instance_id,
+                            "port": instance_registry.port,
+                        },
+                    )
+                    return
                 result = execute_on_main_thread(
                     list_functions_data,
-                    offset=int(request_data.get("offset", 0) or 0),
-                    limit=int(request_data.get("limit", 200) or 200),
-                    name_contains=request_data.get("name_contains"),
-                    segment=request_data.get("segment"),
-                    include_thunks=bool(request_data.get("include_thunks", False)),
-                    include_library_functions=bool(
-                        request_data.get("include_library_functions", False)
-                    ),
+                    offset=offset,
+                    limit=limit,
+                    name_contains=name_contains,
+                    segment=segment,
+                    include_thunks=include_thunks,
+                    include_library_functions=include_library_functions,
                     write=False,
                 )
                 self._send_json_response(200, result)

@@ -60,6 +60,7 @@ dirty=true / apply_changes_mutation_flag
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
 | U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U006 `/functions` corner cases | workflow run `26925694907`, artifact `7401369820` | `functions_corner` mode covered segment/name/include/numeric/invalid parameter semantics; fixture-dependent residuals remain |
 | U007 `/decompile` corner case | workflow run `26926171098`, artifact `7401525174` | start/middle/name decompile, no-function/invalid/missing-name structured errors, thunk/import, largest function, Hex-Rays pseudocode path |
 | U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
 
@@ -540,6 +541,96 @@ Notes:
 - This run uses direct server tool-function calls after U004 already verified real MCP transports. U005 focuses on multi-instance selector semantics and live IDA registry behavior.
 
 
+
+
+## 2026-06-04 U006：`/functions` corner case
+
+Evidence:
+
+- Workflow run: `26925694907`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/u006-functions-corner-test-20260604-0b169c` / `231cd63172e974dad0a04b8eb5de036c230549a0`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401369820`
+- Files inspected: `controller_state.json`, `result.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_api_test
+ida_api_test_mode=functions_corner
+ida_timeout_seconds=180
+run_timeout_seconds=300
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest hello hostname=DESKTOP-QBSO5C3
+guest python_version=3.11.7
+guest result status=completed
+guest result exit_code=0
+payload mode=functions_corner
+payload status=passed
+IDA plugin instance=5264_test1.dll
+IDA plugin port=13338
+health.status=ok
+metadata.dirty=false
+functions_page.total=130
+functions_limit_one.returned=1
+functions_offset_beyond_total.returned=0
+functions_offset_beyond_total.functions=[]
+functions include-thunks/library matrix returned lists and respected limit=25
+functions include-thunks/library totals were monotonic
+functions segment=.text filter returned only .text functions
+functions missing segment returned returned=0, functions=[]
+functions name_contains=SUB_ matched case-insensitively
+functions Unicode/special name_contains="\\u2603_unlikely_*[]" returned a valid empty page
+functions numeric string params accepted offset="0", limit="2", include_thunks="false", include_library_functions="true"
+functions limit=0 -> HTTP 400 field=limit error="limit must be >= 1"
+functions limit=-1 -> HTTP 400 field=limit error="limit must be >= 1"
+functions limit=5001 -> HTTP 400 field=limit error="limit must be <= 5000"
+functions limit="not-an-int" -> HTTP 400 field=limit error="limit must be an integer"
+functions offset=-1 -> HTTP 400 field=offset error="offset must be >= 0"
+functions offset="not-an-int" -> HTTP 400 field=offset error="offset must be an integer"
+functions name_contains=123 -> HTTP 400 field=name_contains
+functions segment=123 -> HTTP 400 field=segment
+functions include_thunks="not-bool" -> HTTP 400 field=include_thunks
+functions include_library_functions="not-bool" -> HTTP 400 field=include_library_functions
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+/functions segment filter
+/functions include_thunks=false/true matrix
+/functions include_library_functions=false/true matrix
+/functions name_contains case-insensitive behavior
+/functions name_contains Unicode/special-character input
+/functions numeric string offset/limit and boolean string coercion
+/functions limit lower/upper/type validation
+/functions offset lower/type validation
+/functions name_contains/segment type validation
+/functions boolean flag type validation
+```
+
+Notes:
+
+- First attempt `26925551740` proved all U006 assertions reached `api_tests_done status=passed`, but failed when final result stdout used `ensure_ascii=False` and Windows guest stdout used GBK, which could not encode `☃`. Commit `231cd63172e974dad0a04b8eb5de036c230549a0` fixed payload stdout by ASCII-escaping final/stage JSON while keeping UTF-8 files.
+- This run covers `/functions` boundary semantics on `test1.dll`. Exact fixture-dependent cases still need dedicated binaries/databases: empty database / 0 functions, huge function-count pagination, duplicate function names, and demangled-name fixtures.
 
 ## 2026-06-04 U007：`/decompile` corner case
 

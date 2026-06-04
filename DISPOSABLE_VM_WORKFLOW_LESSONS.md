@@ -61,6 +61,7 @@ restore_extra_args_json=[]
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
 | U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
 | U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
+| U006 `/functions` corner cases | Passed | `26925694907`, artifact `7401369820` |
 | U013 patch_bytes complex cases | Passed | `26926417574`, artifact `7401627652` |
 
 ### Final full-smoke coverage
@@ -227,6 +228,33 @@ artifact=disposable-vm-guest-agent-smoke / 7401401506
 ```
 
 This verifies the selector rules that protect multi-database sessions from accidentally reading or writing the wrong IDA instance.
+
+
+Run `26925694907` covered U006, the main `/functions` corner-case semantics, after fixing a Windows console encoding issue found in run `26925551740`:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=functions_corner
+payload status=passed
+functions_page.total=130
+functions include_thunks/include_library_functions 2x2 matrix passed
+segment=.text filter returned only .text functions
+missing segment returned returned=0, functions=[]
+name_contains=SUB_ matched case-insensitively
+Unicode/special name_contains="\\u2603_unlikely_*[]" returned a valid empty page
+numeric string params accepted offset="0" and limit="2"
+boolean strings accepted include_thunks="false" and include_library_functions="true"
+limit=0/-1/5001/non-int returned HTTP 400 field=limit
+offset=-1/non-int returned HTTP 400 field=offset
+name_contains/segment non-string returned HTTP 400 with field names
+invalid boolean flags returned HTTP 400 with field names
+artifact=disposable-vm-guest-agent-smoke / 7401369820
+```
+
+Fixture-dependent `/functions` residuals remain: empty database / 0 functions, huge function-count pagination, duplicate function names, and demangled-name fixtures.
 
 Run `26926417574` closed U013, the patch_bytes complex-case test:
 
@@ -469,6 +497,32 @@ Rule:
 - Do not fail IDA-Script-MCP smoke because unrelated third-party plugin warnings appear.
 - Do fail if `IDA-Script-MCP` support files produce `PLUGIN_ENTRY` or import errors.
 
+
+### 9. Windows guest stdout may use GBK; escape non-ASCII JSON printed to console
+
+Symptom in run `26925551740`:
+
+```text
+IDA_API_STAGE reached functions_corner_tests_done
+api_tests_done status=passed
+IDA_PLUGIN_API_TEST_ERROR={"type":"UnicodeEncodeError", "message":"'gbk' codec can't encode character '\\u2603' ..."}
+```
+
+Root cause:
+
+- U006 intentionally sent a Unicode/special `name_contains` probe containing `☃`.
+- The payload wrote UTF-8 result files correctly, but the final `print("IDA_PLUGIN_API_TEST_RESULT=" + json.dumps(..., ensure_ascii=False))` tried to write raw `☃` to a Windows console using GBK.
+
+Fix:
+
+- Keep artifact/result files as UTF-8.
+- Use `ensure_ascii=True` for JSON printed to stdout/stderr (`IDA_API_STAGE`, `IDA_PLUGIN_API_TEST_RESULT`, `IDA_PLUGIN_API_TEST_ERROR`).
+
+Rule:
+
+- Payload console output must be transport-safe ASCII, because guest console encoding is not guaranteed to be UTF-8.
+- Do not remove Unicode endpoint probes; escape them at the console boundary instead.
+
 ## Practical workflow rules for the next tests
 
 ### Start with the smallest mode
@@ -533,6 +587,8 @@ dedicated action/mode, not default full smoke
 | `26923418555` | `0f689dc...` | Success | U002 worker hard-timeout/kill-tree passed; artifact `7400538789`. |
 | `26923741508` | `409ced2...` | Failure | U003 payload failed before first matrix case due nested class `script_path` name resolution. |
 | `26923830535` | `fa086d2...` | Success | U003 worker failure-state matrix passed; artifact `7400695878`. |
+| `26925551740` | `df09bff...` | Failure | U006 assertions passed, then final stdout failed on GBK `UnicodeEncodeError` for `☃`. |
+| `26925694907` | `231cd63...` | Success | U006 `/functions` corner-case mode passed; artifact `7401369820`. |
 | `26924502072` | `7d14f8d...` | Failure | U004 first attempt installed MCP deps through required proxy and started stdio client, but tool args missed FastMCP `params` wrapper. |
 | `26924654174` | `c6a34c0...` | Failure | U004 stdio read tools passed; execute_idapython through separate MCP server process hard-timed out. |
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
@@ -551,12 +607,13 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, and U013 patch_bytes complex cases are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, and U013 patch_bytes complex cases are now verified separately.
 
 The remaining backlog after U013 includes:
 
 ```text
 U010/U011/U012/U014 apply_changes corner cases
+U006R fixture-dependent `/functions` residuals
 read-only endpoint corner cases
 installer/client config coverage
 negative replay/fingerprint edge cases

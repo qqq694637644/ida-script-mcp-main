@@ -295,7 +295,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。U013 已由 workflow run `26926417574` 通过并移入 `TESTED.md`。现在建议从 U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage 开始。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。U003 已由 workflow run `26923830535` 通过并移入 `TESTED.md`。U004 已由 workflow run `26925268750` 通过并移入 `TESTED.md`。U005 已由 workflow run `26925755930` 通过并移入 `TESTED.md`。U006 `/functions` 主要 corner-case 语义已由 workflow run `26925694907` 通过并移入 `TESTED.md`；只剩 U006R fixture-dependent residuals。U013 已由 workflow run `26926417574` 通过并移入 `TESTED.md`。现在建议从 U006R、U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage 开始。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -383,6 +383,25 @@ list_functions 返回被选中的 instance_id
 证据已经移入 `TESTED.md`。后续不要重复跑 U005，除非修改了 instance registry 或 selector 解析逻辑。
 
 
+
+### U006：`/functions` corner case（主要语义已通过）
+
+Run `26925694907` 已验证：
+
+```text
+ida_api_test_mode=functions_corner
+/functions include_thunks/include_library_functions 2x2 matrix
+/functions segment=.text filter and missing segment
+/functions name_contains case-insensitive probe
+/functions Unicode/special name_contains probe
+/functions numeric string offset/limit and boolean strings
+/functions limit=0/-1/5001/non-int -> structured HTTP 400
+/functions offset=-1/non-int -> structured HTTP 400
+/functions name_contains/segment/boolean flag type errors -> structured HTTP 400
+```
+
+证据已经移入 `TESTED.md`。第一次 run `26925551740` 的断言已经通过但最终 stdout 因 GBK 无法输出 `☃` 而失败；修复经验已经写入 `DISPOSABLE_VM_WORKFLOW_LESSONS.md`。后续不要重复跑 U006 主语义，除非修改了 `/functions` validation/listing 逻辑。仍需新 fixture 才能测 U006R：空数据库、巨大函数数量分页、重复函数名或 demangled 名称。
+
 ### U013：patch_bytes complex cases（已通过）
 
 Run `26926417574` 已验证：
@@ -427,6 +446,6 @@ dirty 后第二次 destructive apply 被拒绝
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项覆盖，优先选择 U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage。
+4. 如果要推进下一项覆盖，优先选择 U006R、U010/U011/U012/U014 apply_changes corner cases、read-only endpoint corner cases 或 installer/client config coverage。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。

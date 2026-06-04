@@ -66,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--test-mode",
         default=DEFAULT_IDA_API_TEST_MODE,
-        choices=["basic", "full", "apply_changes", "decompile_corner_case"],
+        choices=["basic", "full", "apply_changes", "functions_corner", "decompile_corner_case"],
     )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
@@ -292,7 +292,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         with HEARTBEAT_PATH.open("a", encoding="utf-8") as output:
             output.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
             output.write("\n")
-        print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+        print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
 
 
     def _sha256(path: Path) -> str:
@@ -763,6 +763,230 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         _stage("apply_changes_rejected_when_dirty_done")
 
 
+
+    def _expect_functions_bad_request(result: dict, base_url: str, label: str, payload: dict, expected_field: str) -> None:
+        request_payload = {"offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True}
+        request_payload.update(payload)
+        _stage(f"functions_corner_{label}_start", request_payload)
+        response = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            request_payload,
+            expected_status=400,
+            timeout=10,
+        )
+        body = response["body"]
+        result["responses"][f"functions_corner_{label}"] = body
+        _check(
+            result,
+            f"functions rejects {label} with structured 400",
+            body.get("status") == "error"
+            and body.get("field") == expected_field
+            and bool(body.get("error")),
+            body,
+        )
+        _stage(f"functions_corner_{label}_done")
+
+
+    def _run_functions_corner_tests(base_url: str, functions_page: dict, result: dict) -> None:
+        functions = functions_page.get("functions") or []
+        total_functions = int(functions_page.get("total", 0) or 0)
+        _check(result, "U006 has at least one fixture function", bool(functions), functions_page)
+        first_function = functions[0]
+        first_name = str(first_function.get("name") or "")
+        first_segment = first_function.get("segment")
+
+        _stage("functions_corner_include_matrix_start", {"total_functions": total_functions})
+        include_matrix = {}
+        for include_thunks in (False, True):
+            for include_library_functions in (False, True):
+                key = f"thunks_{str(include_thunks).lower()}_library_{str(include_library_functions).lower()}"
+                response = _json_request(
+                    "POST",
+                    base_url,
+                    "/functions",
+                    {
+                        "offset": 0,
+                        "limit": 25,
+                        "include_thunks": include_thunks,
+                        "include_library_functions": include_library_functions,
+                    },
+                    expected_status=200,
+                    timeout=10,
+                )
+                body = response["body"]
+                include_matrix[key] = body
+                result["responses"][f"functions_corner_include_{key}"] = body
+                _check(result, f"functions include matrix {key} returns a list", isinstance(body.get("functions"), list), body)
+                _check(result, f"functions include matrix {key} respects limit", body.get("returned", 0) <= 25, body)
+        default_total = int(include_matrix["thunks_false_library_false"].get("total", 0) or 0)
+        thunks_total = int(include_matrix["thunks_true_library_false"].get("total", 0) or 0)
+        library_total = int(include_matrix["thunks_false_library_true"].get("total", 0) or 0)
+        all_total = int(include_matrix["thunks_true_library_true"].get("total", 0) or 0)
+        _check(
+            result,
+            "functions include flags are monotonic",
+            default_total <= thunks_total <= all_total and default_total <= library_total <= all_total,
+            {
+                "default_total": default_total,
+                "thunks_total": thunks_total,
+                "library_total": library_total,
+                "all_total": all_total,
+            },
+        )
+        _stage("functions_corner_include_matrix_done")
+
+        if first_segment:
+            _stage("functions_corner_segment_match_start", {"segment": first_segment})
+            segment_match = _json_request(
+                "POST",
+                base_url,
+                "/functions",
+                {
+                    "offset": 0,
+                    "limit": 25,
+                    "segment": first_segment,
+                    "include_thunks": True,
+                    "include_library_functions": True,
+                },
+                expected_status=200,
+                timeout=10,
+            )
+            segment_body = segment_match["body"]
+            result["responses"]["functions_corner_segment_match"] = segment_body
+            _check(result, "functions segment filter returns a list", isinstance(segment_body.get("functions"), list), segment_body)
+            _check(
+                result,
+                "functions segment filter only returns selected segment",
+                all(item.get("segment") == first_segment for item in (segment_body.get("functions") or [])),
+                segment_body,
+            )
+            _stage("functions_corner_segment_match_done")
+
+        _stage("functions_corner_segment_missing_start")
+        segment_missing = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {
+                "offset": 0,
+                "limit": 25,
+                "segment": "__ida_script_mcp_missing_segment__",
+                "include_thunks": True,
+                "include_library_functions": True,
+            },
+            expected_status=200,
+            timeout=10,
+        )
+        missing_segment_body = segment_missing["body"]
+        result["responses"]["functions_corner_segment_missing"] = missing_segment_body
+        _check(
+            result,
+            "functions missing segment returns empty page",
+            missing_segment_body.get("returned") == 0 and missing_segment_body.get("functions") == [],
+            missing_segment_body,
+        )
+        _stage("functions_corner_segment_missing_done")
+
+        if first_name:
+            name_probe = first_name[: max(1, min(4, len(first_name)))]
+            case_probe = name_probe.swapcase() or name_probe.upper()
+            _stage("functions_corner_name_case_start", {"name_probe": name_probe, "case_probe": case_probe})
+            name_case = _json_request(
+                "POST",
+                base_url,
+                "/functions",
+                {
+                    "offset": 0,
+                    "limit": 25,
+                    "name_contains": case_probe,
+                    "include_thunks": True,
+                    "include_library_functions": True,
+                },
+                expected_status=200,
+                timeout=10,
+            )
+            name_case_body = name_case["body"]
+            result["responses"]["functions_corner_name_case"] = name_case_body
+            returned_names = [str(item.get("name") or "") for item in (name_case_body.get("functions") or [])]
+            _check(result, "functions name_contains is case-insensitive", bool(returned_names), name_case_body)
+            _check(
+                result,
+                "functions name_contains results match case-insensitive probe",
+                all(case_probe.lower() in name.lower() for name in returned_names),
+                {"case_probe": case_probe, "returned_names": returned_names},
+            )
+            _stage("functions_corner_name_case_done")
+
+        _stage("functions_corner_name_unicode_special_start")
+        name_unicode = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {
+                "offset": 0,
+                "limit": 25,
+                "name_contains": "☃_unlikely_*[]",
+                "include_thunks": True,
+                "include_library_functions": True,
+            },
+            expected_status=200,
+            timeout=10,
+        )
+        name_unicode_body = name_unicode["body"]
+        result["responses"]["functions_corner_name_unicode_special"] = name_unicode_body
+        _check(result, "functions unicode/special name filter returns a list", isinstance(name_unicode_body.get("functions"), list), name_unicode_body)
+        _stage("functions_corner_name_unicode_special_done")
+
+        _stage("functions_corner_numeric_string_params_start")
+        numeric_string_params = _json_request(
+            "POST",
+            base_url,
+            "/functions",
+            {"offset": "0", "limit": "2", "include_thunks": "false", "include_library_functions": "true"},
+            expected_status=200,
+            timeout=10,
+        )
+        numeric_string_body = numeric_string_params["body"]
+        result["responses"]["functions_corner_numeric_string_params"] = numeric_string_body
+        _check(
+            result,
+            "functions accepts numeric string offset/limit and boolean strings",
+            numeric_string_body.get("offset") == 0
+            and numeric_string_body.get("limit") == 2
+            and numeric_string_body.get("include_thunks") is False
+            and numeric_string_body.get("include_library_functions") is True
+            and numeric_string_body.get("returned", 0) <= 2,
+            numeric_string_body,
+        )
+        _stage("functions_corner_numeric_string_params_done")
+
+        invalid_cases = [
+            ("limit_zero", {"limit": 0}, "limit"),
+            ("limit_negative", {"limit": -1}, "limit"),
+            ("limit_too_large", {"limit": 5001}, "limit"),
+            ("limit_non_integer", {"limit": "not-an-int"}, "limit"),
+            ("offset_negative", {"offset": -1}, "offset"),
+            ("offset_non_integer", {"offset": "not-an-int"}, "offset"),
+            ("name_non_string", {"name_contains": 123}, "name_contains"),
+            ("segment_non_string", {"segment": 123}, "segment"),
+            ("include_thunks_invalid", {"include_thunks": "not-bool"}, "include_thunks"),
+            ("include_library_invalid", {"include_library_functions": "not-bool"}, "include_library_functions"),
+        ]
+        _stage("functions_corner_invalid_inputs_start", {"case_count": len(invalid_cases)})
+        for label, payload, expected_field in invalid_cases:
+            _expect_functions_bad_request(result, base_url, label, payload, expected_field)
+        _stage("functions_corner_invalid_inputs_done")
+
+        result.setdefault("warnings", []).append(
+            {
+                "name": "U006 fixture limits",
+                "message": "This run covers /functions boundary semantics on test1.dll; empty database, huge function-count pagination, and duplicate/demangled-name fixtures still need dedicated binaries if exact fixture coverage is required.",
+            }
+        )
+
+
     def _u007_note(result: dict, name: str, detail: object | None = None) -> None:
         result["warnings"].append({"name": name, "detail": detail})
 
@@ -1082,6 +1306,13 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
             _check(result, "functions name filter is accepted", "functions" in functions_filter["body"], functions_filter["body"])
             _stage("functions_filter_done")
 
+        if IDA_API_TEST_MODE == "functions_corner":
+            _stage("functions_corner_tests_start")
+            _run_functions_corner_tests(base_url, functions_page["body"], result)
+            _stage("functions_corner_tests_done")
+            result["status"] = "passed"
+            return result
+
         if IDA_API_TEST_MODE == "basic":
             result["status"] = "passed"
             return result
@@ -1214,7 +1445,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 raise RuntimeError(f"IDA directory does not exist: {ida_dir}")
             if not dll_path.is_file():
                 raise RuntimeError(f"DLL path does not exist: {dll_path}")
-            if IDA_API_TEST_MODE not in {"basic", "full", "apply_changes", "decompile_corner_case"}:
+            if IDA_API_TEST_MODE not in {"basic", "full", "apply_changes", "functions_corner", "decompile_corner_case"}:
                 raise RuntimeError(f"Unsupported IDA API test mode: {IDA_API_TEST_MODE!r}")
 
             plugin_dir = _install_plugin_files()
@@ -1275,7 +1506,11 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                 }
             )
             _write_json(result_path, result)
-            print("IDA_PLUGIN_API_TEST_RESULT=" + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+            print(
+                "IDA_PLUGIN_API_TEST_RESULT="
+                + json.dumps(result, ensure_ascii=True, sort_keys=True),
+                flush=True,
+            )
 
         return 0 if result.get("status") == "passed" else 1
 
@@ -1292,7 +1527,7 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
                         "message": str(exc),
                         "traceback": traceback.format_exc(),
                     },
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                     sort_keys=True,
                 ),
                 file=sys.stderr,
