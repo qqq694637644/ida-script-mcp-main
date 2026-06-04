@@ -460,6 +460,46 @@ assertions on dirty state and database identity
 dedicated action/mode, not default full smoke
 ```
 
+## U010 rename-complex status: IDA Unicode symbol-name issue is parked
+
+U010 now has a dedicated workflow action and payload:
+
+```text
+task_action=ida_plugin_u010_rename_complex_test
+payload builder: src/ida_script_mcp/payload/ida_u010_rename_complex_test.py
+payload template: src/ida_script_mcp/payload/U010_rename_complex_cases.py
+```
+
+What is verified:
+
+```text
+local ruff and payload-generation tests pass
+workflow action is exposed
+HostMachine -> VMware restore -> guest hello -> payload download -> guest result upload works
+ASCII/default rename in success_matrix applies and is visible
+I64 retention copies the failing session database to the guest Desktop for manual repro
+```
+
+Current blocker:
+
+```text
+U010 success_matrix expects: mcp_u010_测试_<run_id>
+observed in disposable guest: mcp_u010____<run_id>
+affected path: ida_name.set_name(..., SN_NOCHECK|SN_NOWARN)
+```
+
+Decision:
+
+- Keep U010 in `UNTESTED.md`; do not move it to `TESTED.md` yet.
+- Park the issue until the IDA-side Chinese symbol-name fix is active in the disposable guest workflow path.
+- Re-run `ida_plugin_u010_rename_complex_test` after the guest snapshot/IDA install is updated.
+
+Manual repro database from the latest run:
+
+```text
+C:\Users\alion\Desktop\ida-script-mcp-u010-kept-i64\20260604-125255\success_matrix_test1.i64
+```
+
 ## Run index
 
 | Run | Commit | Result | Note |
@@ -485,6 +525,9 @@ dedicated action/mode, not default full smoke
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26926011256` attempt 1 | `8b5f5b4...` | Failure | U010 rename-complex reached success_matrix; Unicode rename sanitized to underscores; artifact `7401490427`. |
+| `26926011256` attempt 2 | `8b5f5b4...` | Failure | U010 rerun after reported IDA-side fix still observed Unicode rename sanitized to underscores; artifact `7403233856`. |
+| `26931550914` | `98f6643...` | Failure | U010 rerun with I64 retention; failing `success_matrix_test1.i64` copied to guest Desktop; artifact `7403322921`. |
 
 ## Current conclusion
 
