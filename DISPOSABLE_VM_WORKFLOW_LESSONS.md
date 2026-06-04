@@ -62,6 +62,7 @@ restore_extra_args_json=[]
 | U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
 | U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
 | U008 `/xrefs` corner case | Passed | `26926339324`, artifact `7401576197` |
+| U013 patch_bytes complex cases | Passed | `26926417574`, artifact `7401627652` |
 
 ### Final full-smoke coverage
 
@@ -227,6 +228,31 @@ artifact=disposable-vm-guest-agent-smoke / 7401401506
 ```
 
 This verifies the selector rules that protect multi-database sessions from accidentally reading or writing the wrong IDA instance.
+
+Run `26926417574` closed U013, the patch_bytes complex-case test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u013_patch_bytes_complex_cases
+payload status=passed
+old_bytes mismatch status=error; metadata stayed clean
+unmapped-only patch status=error; metadata stayed clean
+dry-run status=ok applied=[] skipped=7 errors=[]
+destructive partial status=partial applied=6 errors=1
+applied ops=[op-multi-byte-code, op-middle-byte-code, op-same-byte-code, op-repeat-byte-1, op-repeat-byte-2, op-data-byte]
+partial error op=op-unmapped-partial-stop
+code bytes after partial=b772f22658ff0048ff25da300000cccc
+data byte at 0x180004000 changed ff -> 00
+disassembly refresh observed after patch
+metadata_after_partial.dirty=true
+second destructive apply rejected when dirty
+artifact=disposable-vm-guest-agent-smoke / 7401627652
+```
+
+This verifies the most important `patch_bytes` replay edge cases and adds explicit `old_bytes_hex` checking before mutation.
 
 ## Failure lessons and fixes
 
@@ -514,6 +540,7 @@ dedicated action/mode, not default full smoke
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
 | `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
+| `26926417574` | `ac7cbab...` | Success | U013 patch_bytes complex cases passed; artifact `7401627652`. |
 
 ## Current conclusion
 
@@ -525,12 +552,13 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, and U005 multi-IDA instance selection are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, and U013 patch_bytes complex cases are now verified separately.
 
-The remaining backlog starts after U005. Next likely areas are:
+The remaining backlog after U013 includes:
 
 ```text
-apply_changes/read-only endpoint corner cases
+U010/U011/U012/U014 apply_changes corner cases
+read-only endpoint corner cases
 installer/client config coverage
 negative replay/fingerprint edge cases
 ```
