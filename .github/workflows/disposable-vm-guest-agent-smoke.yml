@@ -47,6 +47,7 @@ on:
           - ida_plugin_u009_inspect_address_test
           - ida_plugin_u005_multi_ida_instance_test
           - ida_plugin_u007_decompile_corner_case_test
+          - ida_plugin_u008_xrefs_corner_case_test
           - ida_plugin_u013_patch_bytes_complex_test
         default: noop
       ida_dir:
@@ -283,6 +284,17 @@ jobs:
             $controllerArgs[7] = $controllerTaskAction
             $scriptPath = Join-Path $resultDir "U007_decompile_corner_case.py"
             py -3 -m ida_script_mcp.payload.ida_u007_decompile_corner_case_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u008_xrefs_corner_case_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U008_xrefs_corner_cases.py"
+            py -3 -m ida_script_mcp.payload.ida_u008_xrefs_corner_case_test `
               --ida-dir $idaDir `
               --dll-path $dllPath `
               --ida-timeout-seconds $idaTimeout `

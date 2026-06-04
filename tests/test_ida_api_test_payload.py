@@ -23,6 +23,9 @@ from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
 from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
     build_guest_u007_decompile_corner_case_test_script,
 )
+from ida_script_mcp.payload.ida_u008_xrefs_corner_case_test import (
+    build_guest_u008_xrefs_corner_case_test_script,
+)
 from ida_script_mcp.payload.ida_u013_patch_bytes_complex_test import (
     build_guest_u013_patch_bytes_complex_test_script,
 )
@@ -307,6 +310,24 @@ def test_build_guest_u007_decompile_corner_case_script_contains_checked_sources(
     compile(script, "<generated_u007_decompile_corner_case_payload>", "exec")
 
 
+def test_build_guest_u008_xrefs_corner_case_script_contains_checked_sources() -> None:
+    script = build_guest_u008_xrefs_corner_case_test_script()
+
+    assert "U008_XREFS_CORNER_CASES_RESULT=" in script
+    assert "U008_XREFS_STAGE=" in script
+    assert '"/xrefs"' in script
+    assert '"flow"' in script
+    assert "xrefs_limit_zero_start" in script
+    assert "xrefs_limit_negative_start" in script
+    assert "xrefs_limit_non_integer_start" in script
+    assert "xrefs_string_data_address_start" in script
+    assert "xrefs_import_thunk_start" in script
+    assert "xrefs_cycle_or_backedge_start" in script
+    assert "U008 xrefs leaves GUI database clean" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    compile(script, "<generated_u008_xrefs_corner_case_payload>", "exec")
+
+
 def test_build_guest_u013_patch_bytes_complex_script_contains_checked_sources() -> None:
     script = build_guest_u013_patch_bytes_complex_test_script()
 
@@ -409,6 +430,18 @@ def test_disposable_vm_workflow_exposes_u007_decompile_corner_case_action() -> N
     assert "ida_plugin_u007_decompile_corner_case_test" in workflow
     assert U007_PAYLOAD_SCRIPT_NAME in workflow
     assert "ida_script_mcp.payload.ida_u007_decompile_corner_case_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u008_xrefs_corner_case_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u008_xrefs_corner_case_test" in workflow
+    assert "U008_xrefs_corner_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u008_xrefs_corner_case_test" in workflow
 
 
 def test_disposable_vm_workflow_exposes_u013_patch_bytes_complex_action() -> None:
