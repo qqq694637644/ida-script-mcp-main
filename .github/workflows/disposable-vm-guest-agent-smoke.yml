@@ -40,6 +40,7 @@ on:
           - ida_plugin_install
           - ida_plugin_api_test
           - ida_plugin_apply_changes_test
+          - ida_plugin_worker_chain_test
         default: noop
       ida_dir:
         description: "Guest IDA Pro directory used for IDA-related tasks"
@@ -205,6 +206,17 @@ jobs:
               --dll-path $dllPath `
               --ida-timeout-seconds $idaTimeout `
               --test-mode apply_changes `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_worker_chain_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "ida_plugin_worker_chain_test_payload.py"
+            py -3 -m ida_script_mcp.payload.ida_worker_chain_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
               --output $scriptPath
             $controllerArgs += @("--script-path", $scriptPath)
           }

@@ -11,6 +11,9 @@ from ida_script_mcp.payload.ida_api_test import (
     DEFAULT_IDA_TIMEOUT_SECONDS,
     build_guest_ida_api_test_script,
 )
+from ida_script_mcp.payload.ida_worker_chain_test import (
+    build_guest_ida_worker_chain_test_script,
+)
 
 
 def test_build_guest_ida_api_test_script_contains_inputs_and_endpoints() -> None:
@@ -98,6 +101,33 @@ def test_disposable_vm_workflow_exposes_apply_changes_action() -> None:
     assert "- apply_changes" in workflow
 
 
+def test_build_guest_ida_worker_chain_test_script_contains_checked_sources() -> None:
+    script = build_guest_ida_worker_chain_test_script()
+
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in script
+    assert "WORKER_CHAIN_STAGE=" in script
+    assert "execute_idapython" in script
+    assert "apply_worker_changes" in script
+    assert "worker_chain_user_script.py" in script
+    assert "IDA_SCRIPT_MCP_WORKER_CHAIN_TARGET_EA" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    assert "__RUNTIME_FILES_B64_JSON__" not in script
+    assert "__USER_SCRIPT_B64_JSON__" not in script
+    compile(script, "<generated_worker_chain_payload>", "exec")
+
+
+def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_worker_chain_test" in workflow
+    assert "ida_plugin_worker_chain_test_payload.py" in workflow
+    assert "ida_script_mcp.payload.ida_worker_chain_test" in workflow
+
+
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
     output = tmp_path / "ida_api_payload.py"
     output.write_text(build_guest_ida_api_test_script(), encoding="utf-8")
@@ -158,4 +188,30 @@ def test_generated_apply_changes_payload_reports_missing_ida_dir(tmp_path) -> No
     assert '"mode": "apply_changes"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "HEARTBEAT_PATH" not in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_worker_chain_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "worker_chain_payload.py"
+    script_path.write_text(
+        build_guest_ida_worker_chain_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "IDA_WORKER_CHAIN_TEST_RESULT=" in result.stdout
+    assert '"mode": "worker_chain"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
     assert "validate_inputs_start" in result.stdout
