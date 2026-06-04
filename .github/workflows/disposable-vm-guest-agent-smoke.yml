@@ -44,6 +44,7 @@ on:
           - ida_plugin_worker_timeout_test
           - ida_plugin_worker_failure_matrix_test
           - ida_plugin_u004_real_mcp_client_test
+          - ida_plugin_u005_multi_ida_instance_test
           - ida_plugin_u007_decompile_corner_case_test
         default: noop
       ida_dir:
@@ -253,6 +254,17 @@ jobs:
             $controllerArgs[7] = $controllerTaskAction
             $scriptPath = Join-Path $resultDir "U004_real_MCP_client_end-to-end.py"
             py -3 -m ida_script_mcp.payload.ida_u004_real_mcp_client_test `
+              --ida-dir $idaDir `
+              --dll-path $dllPath `
+              --ida-timeout-seconds $idaTimeout `
+              --output $scriptPath
+            $controllerArgs += @("--script-path", $scriptPath)
+          }
+          if ($taskAction -eq "ida_plugin_u005_multi_ida_instance_test") {
+            $controllerTaskAction = "python_script"
+            $controllerArgs[7] = $controllerTaskAction
+            $scriptPath = Join-Path $resultDir "U005_multi_IDA_instance_selection.py"
+            py -3 -m ida_script_mcp.payload.ida_u005_multi_ida_instance_test `
               --ida-dir $idaDir `
               --dll-path $dllPath `
               --ida-timeout-seconds $idaTimeout `

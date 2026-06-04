@@ -14,6 +14,9 @@ from ida_script_mcp.payload.ida_api_test import (
 from ida_script_mcp.payload.ida_u004_real_mcp_client_test import (
     build_guest_u004_real_mcp_client_test_script,
 )
+from ida_script_mcp.payload.ida_u005_multi_ida_instance_test import (
+    build_guest_u005_multi_ida_instance_test_script,
+)
 from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
     PAYLOAD_SCRIPT_NAME as U007_PAYLOAD_SCRIPT_NAME,
 )
@@ -206,6 +209,28 @@ def test_build_guest_u004_real_mcp_client_script_contains_checked_sources() -> N
     compile(script, "<generated_u004_real_mcp_client_payload>", "exec")
 
 
+def test_build_guest_u005_multi_ida_instance_script_contains_checked_sources() -> None:
+    script = build_guest_u005_multi_ida_instance_test_script()
+
+    assert "U005_MULTI_IDA_INSTANCE_TEST_RESULT=" in script
+    assert "U005_STAGE=" in script
+    assert "U005_multi_IDA_instance_selection.py" in str(
+        Path("U005_multi_IDA_instance_selection.py")
+    )
+    assert "_u005_copy" in script
+    assert "shutil.copy2" in script
+    assert "list_ida_instances" in script
+    assert "get_ida_database_info" in script
+    assert "list_functions" in script
+    assert "Multiple IDA instances found" in script
+    assert "matched multiple instance ids" in script
+    assert "port takes precedence over conflicting instance_id" in script
+    assert "same directory" in script or "same_dir" in script
+    assert "__RUNTIME_FILES_B64_JSON__" not in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    compile(script, "<generated_u005_multi_ida_instance_payload>", "exec")
+
+
 def test_build_guest_u007_decompile_corner_case_script_contains_checked_sources() -> None:
     script = build_guest_u007_decompile_corner_case_test_script()
 
@@ -270,6 +295,18 @@ def test_disposable_vm_workflow_exposes_u004_real_mcp_client_action() -> None:
     assert "ida_plugin_u004_real_mcp_client_test" in workflow
     assert "U004_real_MCP_client_end-to-end.py" in workflow
     assert "ida_script_mcp.payload.ida_u004_real_mcp_client_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u005_multi_ida_instance_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u005_multi_ida_instance_test" in workflow
+    assert "U005_multi_IDA_instance_selection.py" in workflow
+    assert "ida_script_mcp.payload.ida_u005_multi_ida_instance_test" in workflow
 
 
 def test_disposable_vm_workflow_exposes_u007_decompile_corner_case_action() -> None:
@@ -449,5 +486,31 @@ def test_generated_u004_real_mcp_client_payload_reports_missing_ida_dir(tmp_path
     assert result.returncode == 1
     assert "U004_REAL_MCP_CLIENT_TEST_RESULT=" in result.stdout
     assert '"mode": "u004_real_mcp_client"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_u005_multi_ida_instance_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "U005_multi_IDA_instance_selection.py"
+    script_path.write_text(
+        build_guest_u005_multi_ida_instance_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "U005_MULTI_IDA_INSTANCE_TEST_RESULT=" in result.stdout
+    assert '"mode": "u005_multi_ida_instance_selection"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "validate_inputs_start" in result.stdout

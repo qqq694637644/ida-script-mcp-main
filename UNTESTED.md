@@ -6,35 +6,19 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003 和真实 MCP client smoke U004 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、以及多 IDA 实例选择 U005 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
 U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
 U004 real MCP client end-to-end
+U005 multi-IDA instance selection
 ```
 
-下一轮建议从 U005 多 IDA 实例选择开始；也可以按风险优先选择 apply_changes 或 read-only endpoint corner cases。
+下一轮建议从 apply_changes/read-only endpoint corner cases 或 installer/client config coverage 开始。
 
 ## MCP 层未测
-
-- [ ] **U005 多 IDA 实例选择**
-
-  覆盖：
-
-  ```text
-  两个 IDA 同时启动
-  list_ida_instances 返回多个
-  按 instance_id 选择
-  按 port 选择
-  默认实例歧义时拒绝/提示
-  实例关闭后的 stale registry 清理
-  端口冲突自动递增
-  同名 DLL 多实例 instance_id 是否稳定
-  ```
-
-## read-only endpoint corner case
 
 - [ ] **U006 `/functions` corner case**
 
