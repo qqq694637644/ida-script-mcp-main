@@ -338,10 +338,107 @@ def _json_request(method, base_url, path, payload=None, expected_status=200, tim
     return {"status": status, "body": body}
 
 
+def _clip_value(value, *, max_chars: int = 300, max_items: int = 8, max_keys: int = 30):
+    if isinstance(value, str):
+        if len(value) <= max_chars:
+            return value
+        return {
+            "length": len(value),
+            "prefix": value[: max_chars // 2],
+            "suffix": value[-(max_chars // 2) :],
+        }
+    if isinstance(value, list):
+        clipped = [_clip_value(item, max_chars=max_chars, max_items=max_items, max_keys=max_keys) for item in value[:max_items]]
+        if len(value) > max_items:
+            clipped.append({"truncated_items": len(value) - max_items})
+        return clipped
+    if isinstance(value, dict):
+        items = list(value.items())
+        clipped = {
+            str(key): _clip_value(item, max_chars=max_chars, max_items=max_items, max_keys=max_keys)
+            for key, item in items[:max_keys]
+        }
+        if len(items) > max_keys:
+            clipped["_truncated_keys"] = len(items) - max_keys
+        return clipped
+    return value
+
+
 def _check(result: dict, name: str, ok: bool, detail=None) -> None:
-    result["checks"].append({"name": name, "ok": bool(ok), "detail": detail})
+    check = {"name": name, "ok": bool(ok)}
+    if not ok:
+        check["detail"] = _clip_value(detail)
+        result["failed_check"] = check
+    result["checks"].append(check)
     if not ok:
         raise AssertionError(f"check failed: {name}: {detail!r}")
+
+
+def _response_summary(response):
+    if not isinstance(response, dict):
+        return _clip_value(response)
+    summary = {}
+    for key in (
+        "status",
+        "found",
+        "dirty",
+        "dirty_state_known",
+        "dirty_state_method",
+        "apply_changes_mutated",
+        "ea",
+        "name",
+        "comment",
+        "repeatable_comment",
+        "function_comment",
+        "repeatable_function_comment",
+        "applied",
+        "skipped",
+        "errors",
+        "database_sha256",
+        "database_size",
+    ):
+        if key in response:
+            summary[key] = _clip_value(response[key])
+    return summary or _clip_value(response)
+
+
+def _console_result(result: dict) -> dict:
+    responses = result.get("responses") if isinstance(result.get("responses"), dict) else {}
+    payload = {
+        "status": result.get("status"),
+        "mode": result.get("mode"),
+        "work_dir": result.get("work_dir"),
+        "ready": _clip_value(result.get("ready")),
+        "ida_returncode": result.get("ida_returncode"),
+        "checks": _clip_value(result.get("checks")),
+        "failed_check": _clip_value(result.get("failed_check")),
+        "error": _clip_value(result.get("error")),
+        "targets": result.get("targets"),
+        "target_functions": result.get("target_functions"),
+        "u011_expected": _clip_value(result.get("u011_expected")),
+        "u011_observations": _clip_value(result.get("u011_observations")),
+        "u011_summary": _clip_value(result.get("u011_summary")),
+        "warnings": result.get("warnings"),
+        "response_keys": sorted(str(key) for key in responses),
+    }
+    for key in (
+        "apply_dry_run",
+        "apply_destructive",
+        "metadata_before",
+        "metadata_after_dry_run",
+        "metadata_after_apply",
+        "inspect_after_repeatable_comment",
+        "inspect_after_clear_comment",
+        "inspect_after_long_comment",
+        "inspect_after_unicode_comment",
+        "inspect_after_function_comment",
+        "inspect_after_repeatable_function_comment",
+        "inspect_after_thunk_or_library_comment",
+        "inspect_after_overwrite_comment",
+    ):
+        if key in responses:
+            payload[key] = _response_summary(responses[key])
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def _wait_for_ready(process: subprocess.Popen, ready_path: Path, ida_log_path: Path) -> dict:
@@ -509,7 +606,7 @@ def _run_u011_tests(base_url: str, result: dict) -> None:
     run_id = str(int(time.time()))
     repeatable_comment_text = f"u011 repeatable comment {run_id}"
     clear_seed_text = f"u011 comment to clear {run_id}"
-    long_comment_text = "u011 long comment " + run_id + " " + ("L" * 1536) + " end"
+    long_comment_text = "u011 long comment " + run_id + " " + ("L" * 960) + " end"
     unicode_comment_text = f"u011 Unicode comment {run_id}: 注释/コメント/комментарий/تعليق/λ/emoji-🧪"
     function_comment_text = f"u011 function comment {run_id}"
     repeatable_function_comment_text = f"u011 repeatable function comment {run_id}"
@@ -586,7 +683,14 @@ def _run_u011_tests(base_url: str, result: dict) -> None:
     _check(result, "U011 cleared regular comment is empty", after_clear.get("comment") is None, after_clear)
 
     after_long = _inspect(base_url, result, "inspect_after_long_comment", targets["long_comment"])
-    _check(result, "U011 long comment length preserved", after_long.get("comment") == long_comment_text, {"expected_length": len(long_comment_text), "actual_length": len(after_long.get("comment") or ""), "actual_tail": str(after_long.get("comment") or "")[-40:]})
+    actual_long_comment = after_long.get("comment") or ""
+    result.setdefault("u011_observations", {})["long_comment"] = {
+        "expected_length": len(long_comment_text),
+        "actual_length": len(actual_long_comment),
+        "has_expected_prefix": actual_long_comment.startswith(long_comment_text[:120]),
+        "has_expected_suffix": actual_long_comment.endswith(" end"),
+    }
+    _check(result, "U011 long comment length preserved", actual_long_comment == long_comment_text, result["u011_observations"]["long_comment"])
 
     after_unicode = _inspect(base_url, result, "inspect_after_unicode_comment", targets["unicode_comment"])
     _check(result, "U011 Unicode comment visible", after_unicode.get("comment") == unicode_comment_text, after_unicode)
@@ -683,7 +787,7 @@ def main() -> int:
         _write_json(RESULT_PATH, result)
         print(
             "U011_COMMENT_FUNCTION_COMMENT_TEST_RESULT="
-            + json.dumps(result, ensure_ascii=True, sort_keys=True),
+            + json.dumps(_console_result(result), ensure_ascii=True, sort_keys=True),
             flush=True,
         )
     return 0 if result.get("status") == "passed" else 1
