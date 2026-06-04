@@ -56,6 +56,7 @@ dirty=true / apply_changes_mutation_flag
 | apply_changes destructive smoke | workflow run `26918788898` | destructive replay 基础验证 |
 | patch_bytes destructive smoke | workflow run `26919752930` | 临时 `test1.i64` 中 patch 首字节，不改原始 DLL |
 | U001 full V2.3 worker replay chain | workflow run `26922985347`, artifact `7400373325` | `execute_idapython -> worker ChangeSet -> apply_worker_changes dry-run/destructive -> inspect` |
+| U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -124,11 +125,10 @@ unknown route -> HTTP 404
 Not covered by this run:
 
 ```text
-U002 worker hard timeout / kill process tree
 U003 worker crash/result-missing/recorder-error matrix
 ```
 
-因此 U002-U003 仍保留在 `UNTESTED.md`；U001 已由 run `26922985347` 关闭。
+因此 U003 仍保留在 `UNTESTED.md`；U001 已由 run `26922985347` 关闭，U002 已由 run `26923418555` 关闭。
 
 
 ## 2026-06-04 U001：完整 V2.3 worker replay 主链路
@@ -211,7 +211,82 @@ Notes:
 
 - The guest payload code is checked in as `src/ida_script_mcp/payload/guest_worker_chain_payload.py`, and the worker script is checked in as `src/ida_script_mcp/payload/worker_chain_user_script.py`; the workflow transports generated script text, but the core test logic is reviewable and locally checked.
 - Two implementation issues were found and fixed before U001 passed: guest Python lacked `pydantic`, and IDA 8.3 exposed `idc.SetType` but not `idc.set_type` in the worker.
-- U002 and U003 remain in `UNTESTED.md`.
+- U003 remains in `UNTESTED.md`.
+
+
+## 2026-06-04 U002：worker hard timeout / kill process tree
+
+Evidence:
+
+- Workflow run: `26923418555`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `0f689dc805cca38c64296645984877e92228c8ca`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7400538789`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_worker_timeout_test
+ida_timeout_seconds=240
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=worker_timeout
+payload status=passed
+execute_idapython_timeout.status=timeout
+execute_idapython_timeout.isolated=true
+execute_idapython_timeout.timeout_seconds=2
+execute_idapython_timeout.error.type=WorkerHardTimeout
+execute_idapython_timeout.error.message="Worker exceeded hard timeout of 7 seconds"
+execute_idapython_timeout.hard_timeout=true
+execute_idapython_timeout.killed=true
+execute_idapython_timeout.worker_pid=5492
+execute_idapython_timeout.worker_exit_code=1
+worker_timeout_summary.worker_process_alive_after_kill=false
+worker_timeout_summary.sentinel_seen=true
+execute_idapython_timeout.changes=[]
+metadata_before.dirty=false
+metadata_after_timeout.dirty=false
+metadata_after_timeout.apply_changes_mutated=false
+cleanup reached ida_terminate_done
+```
+
+Coverage confirmed by this run:
+
+```text
+MCP server execute_idapython timeout path
+headless worker process hard timeout
+Windows taskkill process-tree cleanup path
+worker PID recorded and gone after kill
+blocking user script reached execution before kill
+no ChangeSet generated on timeout
+GUI database stayed clean after worker timeout
+```
+
+Notes:
+
+- The worker timeout script is checked in as `src/ida_script_mcp/payload/worker_timeout_user_script.py` and writes a sentinel file before blocking in `time.sleep(999)`.
+- Run `26923320696` first proved the timeout assertions but failed in final payload cleanup because `_read_process_pipes` had been accidentally dropped during refactor. Commit `0f689dc805cca38c64296645984877e92228c8ca` fixed that cleanup issue.
+- U003 remains in `UNTESTED.md`.
 
 ## 移入规则
 

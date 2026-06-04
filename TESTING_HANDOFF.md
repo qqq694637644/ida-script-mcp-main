@@ -220,7 +220,7 @@ worker hard timeout / kill process tree
 worker crash/result-missing/recorder-error matrix
 ```
 
-U001 已由 run `26922985347` 验证并移入 `TESTED.md`。U002-U003 仍保留在 `UNTESTED.md`。
+U001 已由 run `26922985347` 验证并移入 `TESTED.md`。U002 已由 run `26923418555` 验证并移入 `TESTED.md`。U003 仍保留在 `UNTESTED.md`。
 
 ## 6. 已测/未测迁移规则
 
@@ -269,7 +269,7 @@ Notes:
 
 ## 7. 下一步真正该测什么
 
-U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。现在优先级最高的是 `UNTESTED.md` 中 U002-U003。
+U001 已由 workflow run `26922985347` 通过并移入 `TESTED.md`。U002 已由 workflow run `26923418555` 通过并移入 `TESTED.md`。现在优先级最高的是 `UNTESTED.md` 中 U003。
 
 ### U001：完整 V2.3 主链路（已通过）
 
@@ -286,21 +286,22 @@ execute_idapython
 
 证据已经移入 `TESTED.md`。后续不要重复跑 U001，除非修改了 execute/worker/apply 链路。
 
-### U002：worker hard timeout / kill process tree
+### U002：worker hard timeout / kill process tree（已通过）
 
-目标：
+Run `26923418555` 已验证：
 
 ```text
-execute_idapython(code='while True: pass', timeout_seconds=1~3)
+execute_idapython(script_path=worker_timeout_user_script.py, timeout_seconds=2)
 -> result.status == timeout
 -> hard_timeout == true
 -> killed == true
 -> worker_exit_code/worker_pid 有记录
--> 无残留 idat64/ida64 worker 进程
--> GUI 数据库不被修改
+-> worker_process_alive_after_kill == false
+-> sentinel_seen == true
+-> GUI metadata_after_timeout.dirty == false
 ```
 
-建议作为独立 `task_action` 或独立 payload mode，不要和 U001 放同一轮，避免死循环/kill 干扰主链路结果。
+证据已经移入 `TESTED.md`。后续不要重复跑 U002，除非修改了 worker timeout/kill 逻辑。
 
 ### U003：worker 异常状态矩阵
 
@@ -352,6 +353,6 @@ rejected: GUI dirty / dirty unknown / identity missing
 1. 先读本文件、`TESTED.md`、`UNTESTED.md`、`DISPOSABLE_VM_WORKFLOW_LESSONS.md`。
 2. 不要先改 workflow；先决定要关闭 `UNTESTED.md` 的哪一个 U 项。
 3. 如果只是确认环境，跑 `ida_plugin_api_test/full` baseline。
-4. 如果要推进下一项核心覆盖，直接做 U002 worker timeout payload。
+4. 如果要推进下一项核心覆盖，直接做 U003 worker failure-state matrix payload。
 5. 每跑一次外部 workflow，都把 run ID、artifact id、controller/result 关键字段写回文档。
 6. 没有 artifact 证据，不要把任何条目移入 `TESTED.md`。

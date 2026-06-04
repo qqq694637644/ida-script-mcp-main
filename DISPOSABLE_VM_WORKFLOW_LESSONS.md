@@ -57,6 +57,7 @@ restore_extra_args_json=[]
 | `apply_changes` destructive smoke | Passed | `26918788898` |
 | `patch_bytes` destructive smoke | Passed | `26919752930` |
 | U001 full V2.3 worker replay chain | Passed | `26922985347`, artifact `7400373325` |
+| U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
 
 ### Final full-smoke coverage
 
@@ -124,6 +125,30 @@ artifact=disposable-vm-guest-agent-smoke / 7400373325
 ```
 
 This verifies the important V2.3 boundary that worker-generated changes can be reviewed/dry-run and then explicitly replayed into the GUI database.
+
+Run `26923418555` closed U002, the worker hard-timeout/kill-tree test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=worker_timeout
+payload status=passed
+execute_idapython_timeout.status=timeout
+execute_idapython_timeout.hard_timeout=true
+execute_idapython_timeout.killed=true
+execute_idapython_timeout.worker_pid=5492
+execute_idapython_timeout.worker_exit_code=1
+worker_timeout_summary.worker_process_alive_after_kill=false
+worker_timeout_summary.sentinel_seen=true
+execute_idapython_timeout.changes=[]
+metadata_after_timeout.dirty=false
+metadata_after_timeout.apply_changes_mutated=false
+artifact=disposable-vm-guest-agent-smoke / 7400538789
+```
+
+This verifies the hard process timeout path and confirms the GUI database remains clean when a worker is killed.
 
 ## Failure lessons and fixes
 
@@ -401,6 +426,8 @@ dedicated action/mode, not default full smoke
 | `26922753371` | `fea522e...` | Failure | U001 first attempt failed before worker-chain execution because guest Python lacked `pydantic` for server import. |
 | `26922885587` | `98f3768...` | Failure | U001 second attempt reached headless worker; recorder failed on IDA 8.3 `idc.set_type` alias mismatch. |
 | `26922985347` | `2df76f5...` | Success | U001 full worker-chain passed; artifact `7400373325`. |
+| `26923320696` | `192dd45...` | Failure | U002 timeout assertions passed, but payload cleanup failed because `_read_process_pipes` helper was missing. |
+| `26923418555` | `0f689dc...` | Success | U002 worker hard-timeout/kill-tree passed; artifact `7400538789`. |
 
 ## Current conclusion
 
@@ -412,11 +439,10 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes` smoke and the full V2.3 MCP worker-chain replay are now verified separately. The remaining highest-priority unverified areas are:
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, and worker hard-timeout/kill-tree behavior are now verified separately. The remaining highest-priority unverified area is:
 
 ```text
-U002 worker hard timeout / kill process tree
 U003 worker crash / result missing / recorder error matrix
 ```
 
-Keep these separate from the existing full smoke and U001 worker-chain test so failure domains remain clear.
+Keep U003 separate from the existing full smoke, U001 worker-chain test, and U002 timeout test so failure domains remain clear.

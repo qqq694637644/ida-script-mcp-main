@@ -6,29 +6,13 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-下一轮优先从下面两项开始。U001 已通过并移入 `TESTED.md`：
+下一轮优先从 U003 开始。U001、U002 已通过并移入 `TESTED.md`：
 
-- [ ] **U002 worker 硬超时和进程树清理**：死循环或长阻塞 worker 必须返回 `timeout`，并确认 `hard_timeout=true`、`killed=true`、无残留 `idat64/ida64` 进程。
 - [ ] **U003 worker 异常状态矩阵**：真实 IDA worker 下构造 `worker_start_error`、`worker_crashed`、`worker_result_missing`、`recorder_error`、`source_error`、`rejected`。
 
-现有 `disposable-vm-guest-agent-smoke.yml` 现已能通过 `ida_plugin_worker_chain_test` 覆盖 U001。后续 U002-U003 仍应使用同一 workflow 架构新增独立 payload/mode，避免互相干扰。
+现有 `disposable-vm-guest-agent-smoke.yml` 现已能通过 `ida_plugin_worker_chain_test` 覆盖 U001，并通过 `ida_plugin_worker_timeout_test` 覆盖 U002。后续 U003 仍应使用同一 workflow 架构新增独立 payload/mode，避免互相干扰。
 
-## 最高优先级：worker 超时与异常矩阵
-
-- [ ] **U002 worker 硬超时和 kill process tree**
-
-  覆盖：
-
-  ```text
-  while True 死循环
-  长时间 ida_auto / IDAPython 阻塞
-  worker 超时后进程树确实被杀
-  不留下 idat64/ida64 僵尸进程
-  返回 status=timeout
-  hard_timeout=true
-  killed=true
-  stdout/stderr/result/artifacts 合理
-  ```
+## 最高优先级：worker 异常矩阵
 
 - [ ] **U003 worker crash / result missing / recorder error**
 
@@ -453,9 +437,7 @@ Last updated: 2026-06-04
 ## 建议测试顺序
 
 ```text
-1. execute_idapython 真实 headless worker basic query
-2. execute_idapython worker hard timeout / kill process tree
-3. execute_idapython collect_changes -> apply_worker_changes dry-run -> destructive replay
+1. worker failure-state matrix / crash / missing result / recorder error
 4. partial apply failure 语义
 5. dirty/unsaved/source_error 真实数据库状态
 6. 多实例 instance_id/port 选择
