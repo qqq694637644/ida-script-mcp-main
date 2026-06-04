@@ -60,6 +60,9 @@ restore_extra_args_json=[]
 | U002 worker hard timeout / kill process tree | Passed | `26923418555`, artifact `7400538789` |
 | U003 worker failure-state matrix | Passed | `26923830535`, artifact `7400695878` |
 | U004 real MCP client end-to-end | Passed | `26925268750`, artifact `7401236989` |
+| U005 multi-IDA instance selection | Passed | `26925755930`, artifact `7401401506` |
+| U011 comment/function_comment complex cases | Passed | `26926598576`, artifact `7401657997` |
+| U013 patch_bytes complex cases | Passed | `26926417574`, artifact `7401627652` |
 
 ### Final full-smoke coverage
 
@@ -199,6 +202,81 @@ artifact=disposable-vm-guest-agent-smoke / 7401236989
 ```
 
 This verifies real MCP client transport and tool-result plumbing. Successful worker-generated replay remains covered by U001; U004 intentionally treats `execute_idapython` as a real-client structured-result check.
+
+Run `26925755930` closed U005, the multi-IDA instance selector test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u005_multi_ida_instance_selection
+payload status=passed
+same-directory copy=test1_u005_copy.dll
+primary instance=7388_test1.dll port=13338 database=test1.dll
+copy instance=2328_test1_u005_copy.dll port=13339 database=test1_u005_copy.dll
+list_ida_instances.count=2
+no selector rejected multiple instances
+full instance_id selectors chose primary/copy correctly
+unique substring selectors chose primary/copy correctly
+port selector chose copy
+port precedence over conflicting instance_id chose copy
+ambiguous selector `test1` rejected as matched multiple instance ids
+missing selector rejected as not found
+list_functions returned selected instance_id for both primary and copy
+artifact=disposable-vm-guest-agent-smoke / 7401401506
+```
+
+This verifies the selector rules that protect multi-database sessions from accidentally reading or writing the wrong IDA instance.
+
+Run `26926417574` closed U013, the patch_bytes complex-case test:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u013_patch_bytes_complex_cases
+payload status=passed
+old_bytes mismatch status=error; metadata stayed clean
+unmapped-only patch status=error; metadata stayed clean
+dry-run status=ok applied=[] skipped=7 errors=[]
+destructive partial status=partial applied=6 errors=1
+applied ops=[op-multi-byte-code, op-middle-byte-code, op-same-byte-code, op-repeat-byte-1, op-repeat-byte-2, op-data-byte]
+partial error op=op-unmapped-partial-stop
+code bytes after partial=b772f22658ff0048ff25da300000cccc
+data byte at 0x180004000 changed ff -> 00
+disassembly refresh observed after patch
+metadata_after_partial.dirty=true
+second destructive apply rejected when dirty
+artifact=disposable-vm-guest-agent-smoke / 7401627652
+```
+
+This verifies the most important `patch_bytes` replay edge cases and adds explicit `old_bytes_hex` checking before mutation.
+
+Run `26926598576` closed U011, the comment/function_comment complex-case test:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=u011_comment_function_comment_complex
+payload status=passed
+dry-run status=ok applied=[] errors=[] skipped=11
+destructive apply status=partial applied=10 errors=1
+expected error op=op-function-comment-non-function message="No function found for address 0x7fffffffffff"
+repeatable regular comment persisted
+cleared regular comment persisted as null
+long comment exact length=993 persisted
+Unicode comment persisted with CJK/Japanese/Cyrillic/Arabic/lambda/emoji
+function_comment and repeatable_function_comment persisted
+thunk/library regular comment persisted on RegQueryValueExW
+same-address overwrite kept the second value
+metadata_after_apply.dirty=true
+artifact=disposable-vm-guest-agent-smoke / 7401657997
+```
+
+This verified comment/function_comment replay semantics in a disposable temporary IDB.
 
 ## Failure lessons and fixes
 
@@ -467,7 +545,7 @@ Observed during U011:
 ```text
 Run 26926069955: U011 reached destructive apply, but final stdout failed under the guest GBK console when the JSON marker contained Arabic/emoji text.
 Run 26926193824: ensure_ascii=True avoided the encoding crash, but printing full endpoint responses made result.json stdout_tail start inside a huge response body and hid the useful failure context.
-Run 26926404836: compact console result plus bounded long-comment assertion passed.
+Run 26926598576: compact console result plus bounded long-comment assertion passed on the latest pre-merge PR head.
 ```
 
 Fix:
@@ -506,9 +584,11 @@ Rule:
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
 | `26926069955` | `5a7272f...` | Failure | U011 core apply path reached expected partial apply, but Unicode final JSON crashed on the guest GBK stdout. |
 | `26926193824` | `8c1f617...` | Failure | U011 avoided the encoding crash, but full stdout JSON hid the failed assertion behind large response bodies. |
-| `26926404836` | `676c798...` | Success | U011 comment/function_comment complex passed; artifact `7401605657`. |
+| `26926598576` | `0ad9f93...` | Success | U011 comment/function_comment complex passed; artifact `7401657997`. |
+| `26926417574` | `ac7cbab...` | Success | U013 patch_bytes complex cases passed; artifact `7401627652`. |
 
 ## Current conclusion
 
@@ -520,13 +600,13 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, and U011 comment/function_comment complex behavior are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U011 comment/function_comment complex cases, and U013 patch_bytes complex cases are now verified separately.
 
-The original sequential backlog still has U005-U010 open, and U011 is now closed. Next likely areas are:
+The remaining backlog after U011/U013 includes:
 
 ```text
-U005 multi-IDA instance selection
-U012 set_type complex cases if continuing the apply_changes operation coverage thread
-apply_changes/read-only endpoint corner cases
+U010/U012/U014 apply_changes corner cases
+read-only endpoint corner cases
 installer/client config coverage
+negative replay/fingerprint edge cases
 ```

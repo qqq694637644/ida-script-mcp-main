@@ -1321,6 +1321,48 @@ def _patch_bytes_with_fallback(ea: int, data: bytes) -> bool:
     raise RuntimeError("; ".join(attempts) or "IDA byte patch APIs returned failure")
 
 
+def _read_current_bytes_hex(ea: int, size: int) -> str | None:
+    if size <= 0:
+        return ""
+    try:
+        import ida_bytes
+
+        getter = getattr(ida_bytes, "get_bytes", None)
+        if getter is not None:
+            data = getter(ea, size)
+            if data is not None:
+                return bytes(data).hex()
+    except Exception:
+        pass
+    try:
+        import idc
+
+        byte_getter = getattr(idc, "get_wide_byte", None)
+        if byte_getter is None:
+            return None
+        return bytes(int(byte_getter(ea + offset)) & 0xFF for offset in range(size)).hex()
+    except Exception:
+        return None
+
+
+def _validate_patch_old_bytes(ea: int, old_bytes_hex: str | None) -> None:
+    if not old_bytes_hex:
+        return
+    try:
+        expected = bytes.fromhex(old_bytes_hex).hex()
+    except ValueError as exc:
+        raise RuntimeError(f"old_bytes_hex is not valid hex: {old_bytes_hex!r}") from exc
+    actual = _read_current_bytes_hex(ea, len(expected) // 2)
+    if actual is None:
+        raise RuntimeError(
+            f"Could not read current bytes for old_bytes check at {hex(int(ea))}"
+        )
+    if actual.lower() != expected.lower():
+        raise RuntimeError(
+            f"old_bytes mismatch at {hex(int(ea))}: expected {expected}, found {actual}"
+        )
+
+
 def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResult:
     op = operation.op
     try:
@@ -1342,6 +1384,7 @@ def _execute_change_operation(operation, *, dry_run: bool) -> OperationApplyResu
                 raise RuntimeError(f"No function found for address {hex(int(operation.ea))}")
             ok = set_func_cmt(func, operation.text, int(operation.repeatable))
         elif op == "patch_bytes":
+            _validate_patch_old_bytes(operation.ea, operation.old_bytes_hex)
             ok = _patch_bytes_with_fallback(operation.ea, bytes.fromhex(operation.new_bytes_hex))
         elif op == "set_type":
             ok = _apply_type_with_fallback(operation.ea, operation.decl)

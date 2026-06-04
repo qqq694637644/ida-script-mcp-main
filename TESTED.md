@@ -59,7 +59,10 @@ dirty=true / apply_changes_mutation_flag
 | U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
-| U011 comment / function_comment complex | workflow run `26926404836`, artifact `7401605657` | repeatable/clear/long/Unicode comments, function comments, non-function error, thunk/library comment, overwrite order |
+| U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
+| U007 `/decompile` corner case | workflow run `26926171098`, artifact `7401525174` | start/middle/name decompile, no-function/invalid/missing-name structured errors, thunk/import, largest function, Hex-Rays pseudocode path |
+| U011 comment / function_comment complex | workflow run `26926598576`, artifact `7401657997` | repeatable/clear/long/Unicode comments, function comments, non-function error, thunk/library comment, overwrite order |
+| U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -458,16 +461,177 @@ Notes:
 - The builder is `src/ida_script_mcp/payload/ida_u004_real_mcp_client_test.py`.
 - The run closed U004 as a real client/transport/tool-result smoke. U001 remains the stronger test for successful worker-generated ChangeSet replay, because isolated worker execution from a separate stdio MCP server process still returns a structured hard-timeout result in this guest environment.
 
+
+## 2026-06-04 U005：multi-IDA instance selection
+
+Evidence:
+
+- Workflow run: `26925755930`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `8146b3c93efd8461e336156f3cb658302184bd2e`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401401506`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u005_multi_ida_instance_test
+ida_timeout_seconds=300
+run_timeout_seconds=1200
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=u005_multi_ida_instance_selection
+payload status=passed
+same-directory copy created: C:\Users\alion\Desktop\test1_u005_copy.dll
+primary instance: 7388_test1.dll, database=test1.dll, port=13338
+copy instance: 2328_test1_u005_copy.dll, database=test1_u005_copy.dll, port=13339
+list_ida_instances.count=2
+no selector rejects with "Multiple IDA instances found. Specify instance_id or port."
+full primary instance_id selects primary port 13338 and dirty=false
+full copy instance_id selects copy port 13339 and dirty=false
+unique primary filename substring `test1.dll` selects primary
+unique copy substring `u005_copy` selects copy
+port selector 13339 selects copy
+port takes precedence over conflicting instance_id and selects copy
+ambiguous selector `test1` is rejected with "matched multiple instance ids"
+missing selector `definitely_missing_u005_instance` is rejected with "not found"
+list_functions by primary id returns functions and instance_id=7388_test1.dll
+list_functions by copy substring returns functions and instance_id=2328_test1_u005_copy.dll
+copied DLL cleanup removed the temporary same-directory copy
+```
+
+Coverage confirmed by this run:
+
+```text
+two IDA GUI processes running concurrently
+same-directory DLL copy used for second database
+instance registry lists multiple live processes
+MCP server tool implementation rejects missing selector when multiple instances exist
+full instance_id selection
+unique substring instance_id selection
+port selection
+port-over-instance_id precedence
+ambiguous substring rejection
+missing instance rejection
+selected instance carries through read-only tool results
+```
+
+Notes:
+
+- U005 payload source is checked in as `src/ida_script_mcp/payload/U005_multi_IDA_instance_selection.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u005_multi_ida_instance_test.py`.
+- This run uses direct server tool-function calls after U004 already verified real MCP transports. U005 focuses on multi-instance selector semantics and live IDA registry behavior.
+
+
+
+## 2026-06-04 U007：`/decompile` corner case
+
+Evidence:
+
+- Workflow run: `26926171098`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit tested: `gpt/u007-decompile-corner-case-20260604-4e30cb` / `4c6b04e495122fdd15c5c5160c601cc6da6ef5d5`
+- Merged to handoff branch by merge commit: `9d1cd213d496a8f742d752aa9a22a38984037ea4`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401525174`
+- Files inspected: `result.json`, workflow run/job status
+
+Inputs:
+
+```text
+task_action=ida_plugin_u007_decompile_corner_case_test
+ida_timeout_seconds=180
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload status=passed
+IDA plugin instance=8564_test1.dll
+IDA plugin port=13338
+primary function=OpenPerformanceData
+primary function size=1099
+/decompile by start address found=true, pseudocode present, disassembly present
+/decompile by middle address found=true and resolves same function
+/decompile by function name found=true and resolves same function
+/decompile missing name returns found=false with structured error
+/decompile invalid address returns found=false with structured error
+/decompile address 0x0 returns found=false with structured no-function error
+/decompile thunk/import-like function RegQueryValueExW found=true, is_thunk=true, pseudocode/disassembly present
+/decompile largest observed function completed within timeout and returned disassembly
+timings recorded for all U007 decompile probes
+```
+
+Coverage confirmed by this run:
+
+```text
+/decompile address at function start
+/decompile address inside function body
+/decompile name query
+/decompile missing-name structured error
+/decompile invalid-address structured error
+/decompile address outside any function structured error
+/decompile thunk/import-like function
+/decompile largest observed function timing path
+Hex-Rays available path returns pseudocode
+read-only /decompile path leaves GUI database dirty=false
+```
+
+Known unobserved branches:
+
+```text
+Hex-Rays unavailable/no-license path was not observed because this guest had Hex-Rays available.
+Per-function Hex-Rays failure while disassembly remains available was not observed in test1.dll.
+Duplicate function-name ambiguity was not force-created in this read-only payload.
+```
+
+Notes:
+
+- U007 payload builder is checked in as `src/ida_script_mcp/payload/ida_u007_decompile_corner_case_test.py`.
+- U007 reuses the existing `ida_api_test` guest payload framework with `test_mode=decompile_corner_case`.
+- This closes the practical `/decompile` read-only corner-case smoke for the current disposable VM + `test1.dll` baseline. The unobserved branches above remain listed in `UNTESTED.md` as environment/data-construction follow-ups.
+
 ## 2026-06-04 U011：comment / function_comment 复杂情况
 
 Evidence:
 
-- Workflow run: `26926404836`, attempt `1`
+- Workflow run: `26926598576`, attempt `1`
 - Workflow: `Disposable VM guest agent smoke`
-- Branch / commit: `gpt/test-u011-20260604-53f9f2` / `676c7988a5638ca229ed35e56644fb6561bb3fd4`
+- Branch / commit: `gpt/test-u011-20260604-53f9f2` / `0ad9f93f86bdb242e481474a00426bd4c452573e`
 - Job: `Host controller and guest agent smoke`
 - Runner: `HostMachine`
-- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401605657`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401657997`
 - Files inspected: `result.json` containing host result and `U011_COMMENT_FUNCTION_COMMENT_TEST_RESULT` stdout marker
 
 Inputs:
@@ -534,6 +698,91 @@ Notes:
 - The workflow action is `ida_plugin_u011_comment_function_comment_test`.
 - The destructive part operates on a temporary `test1.i64` created with IDA `-o...` inside the guest temp directory; it does not patch the original `C:\Users\alion\Desktop\test1.dll`.
 - This run verifies exact long-comment persistence for 993 characters. Comments beyond roughly 1 KiB remain a separate boundary test if needed.
+
+## 2026-06-04 U013：patch_bytes complex cases
+
+Evidence:
+
+- Workflow run: `26926417574`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-handoff-tracker-20260604-bf55c1` / `ac7cbab77c933ebb5119b7145a14e7f3307a5d1d`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401627652`
+- Files inspected: `controller_state.json`
+
+Inputs:
+
+```text
+task_action=ida_plugin_u013_patch_bytes_complex_test
+ida_timeout_seconds=240
+run_timeout_seconds=600
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+controller_state.status=success
+controller_state.payload_downloaded=true
+guest result status=completed
+guest result exit_code=0
+payload mode=u013_patch_bytes_complex_cases
+payload status=passed
+IDA plugin instance=4648_test1.dll
+IDA plugin port=13338
+metadata_before.dirty=false
+metadata_before.database_sha256=45982ab9a3d595e6380503c259e51bba2fa1728ca9f7321ac58187ff6ca9dd65
+old_bytes mismatch op returned status=error and did not dirty the database
+unmapped-only patch returned status=error and did not dirty the database
+dry-run complex patch returned status=ok, applied=[], skipped=7, errors=[]
+dry-run left original code bytes unchanged: 488d0dd958000048ff25da300000cccc
+destructive partial apply returned status=partial
+partial apply applied 6 patch_bytes operations
+partial apply error op_id=op-unmapped-partial-stop
+multi-byte code patch changed 488d0dd9 -> b772f226
+middle-byte patch changed byte at target+5 from 00 -> ff
+same-byte patch accepted new_bytes == old_bytes at target+12
+repeat patch applied twice at target+10, ending at da
+data/import patch changed byte at 0x180004000 from ff -> 00
+after partial apply code bytes match expected b772f22658ff0048ff25da300000cccc
+disassembly still refreshes after patch: mov     bh, 72h
+metadata_after_partial.dirty=true
+metadata_after_partial.dirty_state_method=apply_changes_mutation_flag
+second destructive apply rejected when dirty
+```
+
+Coverage confirmed by this run:
+
+```text
+old_bytes_hex validation before patching
+old_bytes mismatch failure without mutation
+multi-byte patch
+patch to middle/second byte of an instruction
+same-byte patch where new_bytes == old_bytes
+repeated patch to the same address in one ChangeSet
+patch to data/import address
+unmapped/invalid patch error path
+partial apply semantics: earlier patch ops remain applied after later error
+post-patch inspect_address bytes and disassembly refresh
+metadata dirty state after destructive partial apply
+second destructive apply rejected while dirty/unsaved
+```
+
+Notes:
+
+- U013 payload source is checked in as `src/ida_script_mcp/payload/U013_patch_bytes_complex_cases.py`.
+- The builder is `src/ida_script_mcp/payload/ida_u013_patch_bytes_complex_test.py`.
+- This test added real GUI replay validation for `old_bytes_hex`; before this, `patch_bytes` did not check the old bytes before writing.
+- The final invalid-address error is reported as an old-bytes mismatch because IDA byte getters return `ff` at the high test address; the key assertion is that the op fails before mutation and partial semantics are preserved.
 
 ## 移入规则
 

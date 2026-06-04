@@ -17,8 +17,17 @@ from ida_script_mcp.payload.ida_u004_real_mcp_client_test import (
 from ida_script_mcp.payload.ida_u005_multi_ida_instance_test import (
     build_guest_u005_multi_ida_instance_test_script,
 )
+from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
+    PAYLOAD_SCRIPT_NAME as U007_PAYLOAD_SCRIPT_NAME,
+)
+from ida_script_mcp.payload.ida_u007_decompile_corner_case_test import (
+    build_guest_u007_decompile_corner_case_test_script,
+)
 from ida_script_mcp.payload.ida_u011_comment_function_comment_test import (
     build_guest_u011_comment_function_comment_test_script,
+)
+from ida_script_mcp.payload.ida_u013_patch_bytes_complex_test import (
+    build_guest_u013_patch_bytes_complex_test_script,
 )
 from ida_script_mcp.payload.ida_worker_chain_test import (
     build_guest_ida_worker_chain_test_script,
@@ -95,6 +104,20 @@ def test_build_guest_ida_api_test_script_accepts_apply_changes_mode() -> None:
     outer_script = script.split("BOOTSTRAP_TEMPLATE", maxsplit=1)[0]
     assert "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__" not in outer_script
     compile(script, "<generated_ida_api_test_payload_apply_changes>", "exec")
+
+
+def test_build_guest_ida_api_test_script_accepts_decompile_corner_case_mode() -> None:
+    script = build_guest_ida_api_test_script(test_mode="decompile_corner_case")
+
+    assert 'IDA_API_TEST_MODE = "decompile_corner_case"' in script
+    assert '"/decompile"' in script
+    assert "u007_decompile_corner_cases_start" in script
+    assert "_u007_decompile_request" in script
+    assert '"middle_address"' in script
+    assert '"thunk_or_library"' in script
+    assert "duplicate function-name ambiguity" in script
+    assert "__IDA_API_TEST_MODE_JSON__" not in script
+    compile(script, "<generated_ida_api_test_payload_u007_decompile>", "exec")
 
 
 def test_disposable_vm_workflow_exposes_apply_changes_action() -> None:
@@ -215,6 +238,24 @@ def test_build_guest_u005_multi_ida_instance_script_contains_checked_sources() -
     compile(script, "<generated_u005_multi_ida_instance_payload>", "exec")
 
 
+def test_build_guest_u007_decompile_corner_case_script_contains_checked_sources() -> None:
+    script = build_guest_u007_decompile_corner_case_test_script()
+
+    assert "IDA_PLUGIN_API_TEST_RESULT=" in script
+    assert 'IDA_API_TEST_MODE = "decompile_corner_case"' in script
+    assert "u007_decompile_corner_cases_start" in script
+    assert "_u007_decompile_request" in script
+    assert '"start_address"' in script
+    assert '"middle_address"' in script
+    assert '"name_query"' in script
+    assert '"no_function_address"' in script
+    assert '"invalid_address"' in script
+    assert '"largest_function"' in script
+    assert "Hex-Rays unavailable/failure path" in script
+    assert "__IDA_API_TEST_MODE_JSON__" not in script
+    compile(script, "<generated_u007_decompile_corner_case_payload>", "exec")
+
+
 def test_build_guest_u011_comment_function_comment_script_contains_checked_sources() -> None:
     script = build_guest_u011_comment_function_comment_test_script()
 
@@ -233,6 +274,26 @@ def test_build_guest_u011_comment_function_comment_script_contains_checked_sourc
     assert "__PLUGIN_FILES_B64_JSON__" not in script
     assert "__PLUGIN_EXPECTED_SHA256_JSON__" not in script
     compile(script, "<generated_u011_comment_function_comment_payload>", "exec")
+
+
+def test_build_guest_u013_patch_bytes_complex_script_contains_checked_sources() -> None:
+    script = build_guest_u013_patch_bytes_complex_test_script()
+
+    assert "U013_PATCH_BYTES_COMPLEX_TEST_RESULT=" in script
+    assert "U013_STAGE=" in script
+    assert "U013_patch_bytes_complex_cases.py" in str(Path("U013_patch_bytes_complex_cases.py"))
+    assert "old_bytes mismatch" in script
+    assert "op-multi-byte-code" in script
+    assert "op-middle-byte-code" in script
+    assert "op-same-byte-code" in script
+    assert "op-repeat-byte-1" in script
+    assert "op-repeat-byte-2" in script
+    assert "op-data-byte" in script
+    assert "op-unmapped-partial-stop" in script
+    assert "destructive patch has partial status" in script
+    assert "metadata dirty after destructive partial patch" in script
+    assert "__PLUGIN_FILES_B64_JSON__" not in script
+    compile(script, "<generated_u013_patch_bytes_complex_payload>", "exec")
 
 
 def test_disposable_vm_workflow_exposes_worker_chain_action() -> None:
@@ -295,6 +356,18 @@ def test_disposable_vm_workflow_exposes_u005_multi_ida_instance_action() -> None
     assert "ida_script_mcp.payload.ida_u005_multi_ida_instance_test" in workflow
 
 
+def test_disposable_vm_workflow_exposes_u007_decompile_corner_case_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u007_decompile_corner_case_test" in workflow
+    assert U007_PAYLOAD_SCRIPT_NAME in workflow
+    assert "ida_script_mcp.payload.ida_u007_decompile_corner_case_test" in workflow
+
+
 def test_disposable_vm_workflow_exposes_u011_comment_function_comment_action() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workflow_path = (
@@ -305,6 +378,18 @@ def test_disposable_vm_workflow_exposes_u011_comment_function_comment_action() -
     assert "ida_plugin_u011_comment_function_comment_test" in workflow
     assert "U011_comment_function_comment_complex.py" in workflow
     assert "ida_script_mcp.payload.ida_u011_comment_function_comment_test" in workflow
+
+
+def test_disposable_vm_workflow_exposes_u013_patch_bytes_complex_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u013_patch_bytes_complex_test" in workflow
+    assert "U013_patch_bytes_complex_cases.py" in workflow
+    assert "ida_script_mcp.payload.ida_u013_patch_bytes_complex_test" in workflow
 
 
 def test_generated_ida_api_payload_file_can_be_written(tmp_path) -> None:
@@ -526,5 +611,31 @@ def test_generated_u011_comment_function_comment_payload_reports_missing_ida_dir
     assert result.returncode == 1
     assert "U011_COMMENT_FUNCTION_COMMENT_TEST_RESULT=" in result.stdout
     assert '"mode": "u011_comment_function_comment_complex"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_u013_patch_bytes_complex_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "U013_patch_bytes_complex_cases.py"
+    script_path.write_text(
+        build_guest_u013_patch_bytes_complex_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "U013_PATCH_BYTES_COMPLEX_TEST_RESULT=" in result.stdout
+    assert '"mode": "u013_patch_bytes_complex_cases"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "validate_inputs_start" in result.stdout
