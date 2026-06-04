@@ -59,6 +59,7 @@ dirty=true / apply_changes_mutation_flag
 | U002 worker hard timeout / kill process tree | workflow run `26923418555`, artifact `7400538789` | `execute_idapython` hard timeout killed worker PID and left GUI DB clean |
 | U003 worker failure-state matrix | workflow run `26923830535`, artifact `7400695878` | worker_start_error/source_error/crash/missing-result/recorder_error/rejected all passed |
 | U004 real MCP client end-to-end | workflow run `26925268750`, artifact `7401236989` | stdio + HTTP/SSE real MCP client, tool schemas/results, read tools, execute structured result, apply dry-run |
+| U009 /inspect_address system test | workflow run `26926388631`, artifact `7401596027` | invalid/missing target, byte_count clamp, data/instruction-middle/unmapped, Unicode comments, repeatable comments, clean read-only state |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
 
@@ -456,6 +457,81 @@ Notes:
 - U004 helper worker script is checked in as `src/ida_script_mcp/payload/U004_real_MCP_client_worker_script.py`.
 - The builder is `src/ida_script_mcp/payload/ida_u004_real_mcp_client_test.py`.
 - The run closed U004 as a real client/transport/tool-result smoke. U001 remains the stronger test for successful worker-generated ChangeSet replay, because isolated worker execution from a separate stdio MCP server process still returns a structured hard-timeout result in this guest environment.
+
+
+## 2026-06-04 U009：/inspect_address 系统测试
+
+Evidence:
+
+- Workflow run: `26926388631`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-u009-20260604-5b6c55` / `d1a0cde1502d6f76f3257a18275dba00b25ca64c`
+- Base branch after merge target: `gpt/testing-handoff-tracker-20260604-bf55c1`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401596027`
+- Files inspected: `result.json` from artifact; workflow/job status from GitHub Actions
+
+Inputs:
+
+```text
+task_action=ida_plugin_u009_inspect_address_test
+ida_timeout_seconds=240
+run_timeout_seconds=900
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=inspect_address
+payload status=passed
+/inspect_address invalid address -> found=false with parse error
+/inspect_address missing address/name -> found=false with structured error
+byte_count=0 clamps to 1 and reads one byte
+byte_count negative clamps to 1 and reads one byte
+byte_count huge clamps to 64 and returns bounded bytes
+data address 0x180004030 resolves and reads bytes
+instruction-middle address 0x180001001 resolves and reads bytes
+unmapped high address 0x4000000000000000 resolves without symbol/comment/type/disassembly metadata
+unmapped high address bytes are treated as no-real-bytes when IDA returns ff fill
+seeded address/name lookup returns matching bytes
+Unicode regular comment round-trips through /inspect_address
+Unicode repeatable comment round-trips through /inspect_address
+Unicode function comment round-trips through /inspect_address
+Unicode repeatable function comment round-trips through /inspect_address
+type text is returned
+metadata_after_u009.dirty=false
+metadata_after_u009.apply_changes_mutated=false
+```
+
+Coverage confirmed by this run:
+
+```text
+/inspect_address structured error handling
+/inspect_address byte_count boundary behavior
+/inspect_address on code, data, instruction-tail, and high unmapped addresses
+/inspect_address name lookup path
+Unicode comment and repeatable comment readback
+read-only cleanliness after repeated inspect calls
+U009 workflow action and generated payload path
+```
+
+Notes:
+
+- IDA 8.3 did not preserve the requested Unicode symbol name; it normalized it to an ASCII fallback such as `u009_______1780540155`. The test records this as a warning and still verifies Unicode comments and repeatable comments.
+- IDAPython returned `ffffffffffffffff` for the high unmapped address. U009 treats `None` or all-`ff` bytes as no real mapped bytes, while still asserting no name/comment/type/disassembly metadata is present.
+- Earlier U009 attempts failed on Windows console Unicode output and on the unmapped-byte contract; those fixes are recorded in `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
 
 ## 移入规则
 

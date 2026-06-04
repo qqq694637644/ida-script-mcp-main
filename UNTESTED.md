@@ -6,16 +6,17 @@ Last updated: 2026-06-04
 
 ## 当前优先选择开始的测试
 
-核心 V2.3 worker 生命周期测试 U001-U003 和真实 MCP client smoke U004 已全部通过并移入 `TESTED.md`：
+核心 V2.3 worker 生命周期测试 U001-U003、真实 MCP client smoke U004、以及 `/inspect_address` 系统测试 U009 已全部通过并移入 `TESTED.md`：
 
 ```text
 U001 execute_idapython -> worker ChangeSet -> apply_worker_changes
 U002 worker hard timeout / kill process tree
 U003 worker failure-state matrix
 U004 real MCP client end-to-end
+U009 /inspect_address system test
 ```
 
-下一轮建议从 U005 多 IDA 实例选择开始；也可以按风险优先选择 apply_changes 或 read-only endpoint corner cases。
+下一轮仍建议从 U005 多 IDA 实例选择开始；U006-U008 和 U010+ 仍保留在未测队列。
 
 ## MCP 层未测
 
@@ -77,17 +78,6 @@ U004 real MCP client end-to-end
   自引用/循环引用
   ```
 
-- [ ] **U009 `/inspect_address` 系统测试**
-
-  ```text
-  无效地址
-  byte_count=0/负数/超大值
-  地址在 unmapped 区域
-  地址在 data 段
-  地址在 instruction 中间
-  Unicode comment/type/name
-  repeatable comment / repeatable function comment
-  ```
 
 ## apply_changes 未测风险点
 
