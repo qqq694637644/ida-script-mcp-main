@@ -351,6 +351,7 @@ def test_apply_changes_applies_all_supported_operations(monkeypatch):
                 ("comment", ea, text, repeatable)
             )
             or True,
+            get_bytes=lambda ea, size: b"\x55" if ea == 0x1000 and size == 1 else b"\x00" * size,
             patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or True,
         ),
     )
@@ -413,6 +414,7 @@ def test_apply_changes_patch_bytes_falls_back_to_patch_byte(monkeypatch):
         sys.modules,
         "ida_bytes",
         types.SimpleNamespace(
+            get_bytes=lambda ea, size: b"\x55\x8b" if ea == 0x1000 and size == 2 else b"\x00" * size,
             patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or False,
             patch_byte=lambda ea, value: calls.append(("patch_byte", ea, value)) or True,
         ),
@@ -450,6 +452,7 @@ def test_apply_changes_patch_bytes_accepts_void_return(monkeypatch):
         sys.modules,
         "ida_bytes",
         types.SimpleNamespace(
+            get_bytes=lambda ea, size: b"\x55" if ea == 0x1000 and size == 1 else b"\x00" * size,
             patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)),
             patch_byte=lambda ea, value: calls.append(("patch_byte", ea, value)) or False,
         ),
@@ -475,6 +478,42 @@ def test_apply_changes_patch_bytes_accepts_void_return(monkeypatch):
     assert result["errors"] == []
     assert result["applied"][0]["op_id"] == "op-patch-byte"
     assert calls == [("patch_bytes", 0x1000, b"\x90")]
+
+
+def test_apply_changes_patch_bytes_rejects_old_bytes_mismatch(monkeypatch):
+    _clean_matching_metadata(monkeypatch)
+    monkeypatch.setattr(ida_plugin, "HAS_IDA", True)
+    calls = []
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_bytes",
+        types.SimpleNamespace(
+            get_bytes=lambda ea, size: b"\x55" if ea == 0x1000 and size == 1 else b"\x00" * size,
+            patch_bytes=lambda ea, data: calls.append(("patch_bytes", ea, data)) or True,
+        ),
+    )
+
+    result = ida_plugin.apply_changes_request(
+        _apply_payload(
+            operations=[
+                {
+                    "op_id": "op-patch-byte-mismatch",
+                    "op": "patch_bytes",
+                    "ea": 0x1000,
+                    "source": "explicit_api",
+                    "old_bytes_hex": "90",
+                    "new_bytes_hex": "cc",
+                }
+            ],
+            dry_run=False,
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["applied"] == []
+    assert result["errors"][0]["op_id"] == "op-patch-byte-mismatch"
+    assert "old_bytes mismatch" in result["errors"][0]["message"]
+    assert calls == []
 
 
 def test_apply_changes_patch_bytes_falls_back_to_idc_patch_byte(monkeypatch):
