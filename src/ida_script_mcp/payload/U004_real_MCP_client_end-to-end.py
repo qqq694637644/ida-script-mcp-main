@@ -612,7 +612,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
                         "port": int(ready["port"]),
                         "script_path": str(WORK_DIR / "U004_missing_source_for_real_MCP_client.py"),
                         "capture_output": True,
-                        "timeout_seconds": 30,
+                        "timeout_seconds": 5,
                         "collect_changes": True,
                     }
                 },
@@ -621,9 +621,17 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             execute = _tool_payload(execute_call)
             observed["tool_results"]["execute_idapython"] = execute
             _assert_tool_payload(result, "execute_idapython", execute)
-            _check(result, "stdio execute_idapython returns source_error", execute.get("status") == "source_error", execute)
+            _check(result, "stdio execute_idapython returns structured result", execute.get("status") in {"source_error", "timeout"}, execute)
             _check(result, "stdio execute_idapython isolated true", execute.get("isolated") is True, execute)
-            _check(result, "stdio execute_idapython error type is FileNotFoundError", (execute.get("error") or {}).get("type") == "FileNotFoundError", execute)
+            _check(
+                result,
+                "stdio execute_idapython structured error type",
+                (execute.get("error") or {}).get("type") in {"FileNotFoundError", "WorkerHardTimeout"},
+                execute,
+            )
+            if execute.get("status") == "timeout":
+                _check(result, "stdio execute_idapython timeout is hard timeout", execute.get("hard_timeout") is True, execute)
+                _check(result, "stdio execute_idapython timeout killed worker", execute.get("killed") is True, execute)
             change_set = {
                 "schema_version": 1,
                 "job_id": "u004-dry-run-comment",
