@@ -43,9 +43,13 @@ def build_guest_u005_multi_ida_instance_test_script(
         '"__IDA_EXECUTABLE_CANDIDATES_JSON__"': json.dumps(list(IDA_EXECUTABLE_CANDIDATES)),
         '"__LEGACY_ROOT_SUPPORT_FILES_JSON__"': json.dumps(list(LEGACY_ROOT_SUPPORT_FILES)),
         '"__PLUGIN_FILES_B64_JSON__"': json.dumps(_b64_map(install_files), ensure_ascii=False),
-        '"__PLUGIN_EXPECTED_SHA256_JSON__"': json.dumps(_sha256_map(install_files), ensure_ascii=False),
+        '"__PLUGIN_EXPECTED_SHA256_JSON__"': json.dumps(
+            _sha256_map(install_files), ensure_ascii=False
+        ),
         '"__RUNTIME_FILES_B64_JSON__"': json.dumps(_b64_map(runtime_files), ensure_ascii=False),
-        '"__RUNTIME_EXPECTED_SHA256_JSON__"': json.dumps(_sha256_map(runtime_files), ensure_ascii=False),
+        '"__RUNTIME_EXPECTED_SHA256_JSON__"': json.dumps(
+            _sha256_map(runtime_files), ensure_ascii=False
+        ),
     }
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)

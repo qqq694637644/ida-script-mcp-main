@@ -523,6 +523,27 @@ Rule:
 - Payload console output must be transport-safe ASCII, because guest console encoding is not guaranteed to be UTF-8.
 - Do not remove Unicode endpoint probes; escape them at the console boundary instead.
 
+
+### U009 /inspect_address system test
+
+Run `26926388631` passed the dedicated U009 disposable VM workflow on commit `d1a0cde1502d6f76f3257a18275dba00b25ca64c`:
+
+```text
+workflow conclusion=success
+runner=HostMachine
+guest result status=completed
+guest result exit_code=0
+payload mode=inspect_address
+payload status=passed
+artifact=disposable-vm-guest-agent-smoke / 7401596027
+```
+
+Failures fixed during U009:
+
+- Run `26926002991` failed because the guest Windows console used GBK and could not print emoji/Unicode JSON with `ensure_ascii=False`. Fix: write UTF-8 result files normally, but print stage/result/error JSON to console with `ensure_ascii=True`.
+- Runs `26926115992` and `26926227804` showed that IDAPython may return `ff` bytes for high unmapped addresses. Fix: treat `None` or all-`ff` bytes as no real mapped bytes, and assert absence of name/comment/type/disassembly metadata instead of expecting `bytes_hex is None`.
+- IDA 8.3 normalized the requested Unicode symbol name to an ASCII fallback. Keep this as a warning and verify Unicode through comments/repeatable comments, which round-trip successfully.
+
 ## Practical workflow rules for the next tests
 
 ### Start with the smallest mode
@@ -594,6 +615,10 @@ dedicated action/mode, not default full smoke
 | `26924917010` | `3c5be9a...` | Failure | U004 HTTP/SSE server fix landed, but execute_idapython still timed out. |
 | `26925088431` | `414c1fe...` | Failure | U004 execute_idapython structured timeout observed; assertion still expected source_error. |
 | `26925268750` | `2d8d24a...` | Success | U004 real MCP client stdio + HTTP/SSE smoke passed; artifact `7401236989`. |
+| `26926002991` | `5a3622f...` | Failure | U009 first attempt failed when GBK console could not encode Unicode/emoji JSON output. |
+| `26926115992` | `b94911d...` | Failure | U009 reached real assertions; selected unmapped address returned `ff` bytes instead of `None`. |
+| `26926227804` | `1638fab...` | Failure | U009 high unmapped address still returned `ff` fill; assertion contract needed to allow all-ff bytes with no metadata. |
+| `26926388631` | `d1a0cde...` | Success | U009 /inspect_address system test passed; artifact `7401596027`. |
 | `26925755930` | `8146b3c...` | Success | U005 multi-IDA instance selection passed; artifact `7401401506`. |
 | `26926417574` | `ac7cbab...` | Success | U013 patch_bytes complex cases passed; artifact `7401627652`. |
 
@@ -607,7 +632,7 @@ DLL: C:\Users\alion\Desktop\test1.dll
 Guest Python: 3.11.7
 ```
 
-Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, and U013 patch_bytes complex cases are now verified separately.
+Destructive GUI `/apply_changes`, the full V2.3 MCP worker-chain replay, worker hard-timeout/kill-tree behavior, the U003 worker failure-state matrix, U004 real MCP client transport/tool-result flow, U005 multi-IDA instance selection, U006 `/functions` main corner-case semantics, U009 `/inspect_address` system behavior, and U013 patch_bytes complex cases are now verified separately.
 
 The remaining backlog after U013 includes:
 

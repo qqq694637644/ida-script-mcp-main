@@ -62,6 +62,7 @@ dirty=true / apply_changes_mutation_flag
 | U005 multi-IDA instance selection | workflow run `26925755930`, artifact `7401401506` | same-directory DLL copy, two IDA instances, full/substring/port selectors, ambiguity/missing-instance errors |
 | U006 `/functions` corner cases | workflow run `26925694907`, artifact `7401369820` | `functions_corner` mode covered segment/name/include/numeric/invalid parameter semantics; fixture-dependent residuals remain |
 | U007 `/decompile` corner case | workflow run `26926171098`, artifact `7401525174` | start/middle/name decompile, no-function/invalid/missing-name structured errors, thunk/import, largest function, Hex-Rays pseudocode path |
+| U009 /inspect_address system test | workflow run `26926388631`, artifact `7401596027` | invalid/missing target, byte_count clamp, data/instruction-middle/unmapped, Unicode comments, repeatable comments, clean read-only state |
 | U013 patch_bytes complex cases | workflow run `26926417574`, artifact `7401627652` | multi-byte/middle/same/repeated/data patch, old_bytes mismatch, dry-run, partial apply, dirty rejection |
 
 ## 2026-06-04 当前测试结果：main full smoke baseline
@@ -796,6 +797,66 @@ Notes:
 - The builder is `src/ida_script_mcp/payload/ida_u013_patch_bytes_complex_test.py`.
 - This test added real GUI replay validation for `old_bytes_hex`; before this, `patch_bytes` did not check the old bytes before writing.
 - The final invalid-address error is reported as an old-bytes mismatch because IDA byte getters return `ff` at the high test address; the key assertion is that the op fails before mutation and partial semantics are preserved.
+
+
+## 2026-06-04 U009：/inspect_address 系统测试
+
+Evidence:
+
+- Workflow run: `26926388631`, attempt `1`
+- Workflow: `Disposable VM guest agent smoke`
+- Branch / commit: `gpt/testing-u009-20260604-5b6c55` / `d1a0cde1502d6f76f3257a18275dba00b25ca64c`
+- Base branch after merge target: `gpt/testing-handoff-tracker-20260604-bf55c1`
+- Job: `Host controller and guest agent smoke`
+- Runner: `HostMachine`
+- Artifact: `disposable-vm-guest-agent-smoke`, artifact id `7401596027`
+- Files inspected: `result.json` from artifact; workflow/job status from GitHub Actions
+
+Inputs:
+
+```text
+task_action=ida_plugin_u009_inspect_address_test
+ida_timeout_seconds=240
+run_timeout_seconds=900
+connect_timeout_seconds=600
+controller_url=http://192.168.1.249:8766
+port=8766
+run_vmware_restore=true
+restore_script=C:\Users\alion\Scripts\vmware_restore_test1.py
+restore_gui=true
+ida_dir=C:\Users\alion\Desktop\IDAPro8.3
+dll_path=C:\Users\alion\Desktop\test1.dll
+```
+
+Assertions:
+
+```text
+workflow conclusion=success
+guest result status=completed
+guest result exit_code=0
+payload mode=inspect_address
+payload status=passed
+/inspect_address invalid address -> found=false with parse error
+/inspect_address missing address/name -> found=false with structured error
+byte_count=0/negative -> clamp to 1 and read one byte
+byte_count huge -> clamp to 64 and return bounded bytes
+data address 0x180004030 resolves and reads bytes
+instruction-middle address 0x180001001 resolves and reads bytes
+unmapped high address 0x4000000000000000 has no symbol/comment/type/disassembly metadata
+unmapped high address all-ff bytes are treated as no real mapped bytes
+name lookup returns the seeded target
+Unicode regular/repeatable comments round-trip
+Unicode function/repeatable function comments round-trip
+type text is returned
+metadata_after_u009.dirty=false
+metadata_after_u009.apply_changes_mutated=false
+```
+
+Notes:
+
+- IDA 8.3 normalized the requested Unicode symbol name to an ASCII fallback; Unicode comments/repeatable comments still round-trip.
+- IDAPython returned `ffffffffffffffff` for a high unmapped address; U009 asserts no metadata and treats all-`ff` bytes as no real mapped bytes.
+- Earlier U009 attempts and fixes are recorded in `DISPOSABLE_VM_WORKFLOW_LESSONS.md`.
 
 ## 移入规则
 

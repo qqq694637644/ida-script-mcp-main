@@ -103,6 +103,31 @@ def test_build_guest_ida_api_test_script_accepts_apply_changes_mode() -> None:
     compile(script, "<generated_ida_api_test_payload_apply_changes>", "exec")
 
 
+def test_build_guest_ida_api_test_script_accepts_inspect_address_mode() -> None:
+    script = build_guest_ida_api_test_script(test_mode="inspect_address")
+
+    assert 'IDA_API_TEST_MODE = "inspect_address"' in script
+    assert '"/inspect_address"' in script
+    assert "u009_seed_start" in script
+    assert "u009_inspect_address_tests_start" in script
+    assert "inspect_byte_count_zero" in script
+    assert "inspect_byte_count_negative" in script
+    assert "inspect_byte_count_huge" in script
+    assert "inspect_unmapped_address" in script
+    assert "inspect_data_address" in script
+    assert "inspect_instruction_middle" in script
+    assert "inspect_seeded_unicode_address" in script
+    assert "U009 regular 注释" in script
+    assert "U009 repeatable function 注释" in script
+    assert 'print("IDA_API_STAGE=" + json.dumps(payload, ensure_ascii=True' in script
+    assert '"IDA_PLUGIN_API_TEST_RESULT="' in script
+    assert "json.dumps(result, ensure_ascii=True, sort_keys=True)" in script
+    assert "__IDA_API_TEST_MODE_JSON__" not in script
+    outer_script = script.split("BOOTSTRAP_TEMPLATE", maxsplit=1)[0]
+    assert "__BOOTSTRAP_IDA_API_TEST_MODE_JSON__" not in outer_script
+    compile(script, "<generated_ida_api_test_payload_inspect_address>", "exec")
+
+
 def test_build_guest_ida_api_test_script_accepts_functions_corner_mode() -> None:
     script = build_guest_ida_api_test_script(test_mode="functions_corner")
 
@@ -350,6 +375,18 @@ def test_disposable_vm_workflow_exposes_u004_real_mcp_client_action() -> None:
     assert "ida_script_mcp.payload.ida_u004_real_mcp_client_test" in workflow
 
 
+def test_disposable_vm_workflow_exposes_u009_inspect_address_action() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow_path = (
+        repo_root / ".github" / "workflows" / "disposable-vm-guest-agent-smoke.yml"
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "ida_plugin_u009_inspect_address_test" in workflow
+    assert "U009_inspect_address_system_test.py" in workflow
+    assert "--test-mode inspect_address" in workflow
+
+
 def test_disposable_vm_workflow_exposes_u005_multi_ida_instance_action() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workflow_path = (
@@ -444,6 +481,34 @@ def test_generated_apply_changes_payload_reports_missing_ida_dir(tmp_path) -> No
     assert result.returncode == 1
     assert "IDA_PLUGIN_API_TEST_RESULT=" in result.stdout
     assert '"mode": "apply_changes"' in result.stdout
+    assert "IDA directory does not exist" in result.stdout
+    assert "HEARTBEAT_PATH" not in result.stdout
+    assert "validate_inputs_start" in result.stdout
+
+
+def test_generated_inspect_address_payload_reports_missing_ida_dir(tmp_path) -> None:
+    script_path = tmp_path / "U009_inspect_address_system_test.py"
+    script_path.write_text(
+        build_guest_ida_api_test_script(
+            ida_dir=str(tmp_path / "missing-ida"),
+            dll_path=str(tmp_path / "missing.dll"),
+            ida_timeout_seconds=15,
+            test_mode="inspect_address",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "IDA_PLUGIN_API_TEST_RESULT=" in result.stdout
+    assert '"mode": "inspect_address"' in result.stdout
     assert "IDA directory does not exist" in result.stdout
     assert "HEARTBEAT_PATH" not in result.stdout
     assert "validate_inputs_start" in result.stdout
