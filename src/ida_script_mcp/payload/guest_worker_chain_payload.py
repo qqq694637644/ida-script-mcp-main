@@ -501,13 +501,37 @@ def _run_worker_chain(
         import asyncio
         from ida_script_mcp import server as mcp_server
 
-        execute_params = mcp_server.ExecuteScriptInput(
-            port=int(ready["port"]),
-            script_path=str(user_script),
-            capture_output=True,
-            timeout_seconds=90,
-            collect_changes=True,
-        )
+        class ExecuteParams:
+            instance_id = None
+            port = int(ready["port"])
+            code = None
+            script_path = str(user_script)
+            capture_output = True
+            timeout_seconds = 90
+            collect_changes = True
+
+            def to_execute_request(self):
+                return mcp_server.ExecuteRequest.model_validate(
+                    {
+                        "code": self.code,
+                        "script_path": self.script_path,
+                        "capture_output": self.capture_output,
+                        "timeout_seconds": self.timeout_seconds,
+                    }
+                )
+
+        class ApplyParams:
+            instance_id = None
+
+            def __init__(self, payload: dict):
+                self._payload = dict(payload)
+                self.port = int(self._payload.get("port") or ready["port"])
+
+            def model_dump(self, mode="json", exclude=None):
+                exclude = exclude or set()
+                return {key: value for key, value in self._payload.items() if key not in exclude}
+
+        execute_params = ExecuteParams()
         _stage("worker_chain_execute_start", {"port": int(ready["port"])})
         execute_result = asyncio.run(mcp_server.execute_idapython(execute_params))
         result["responses"]["execute_idapython"] = execute_result
@@ -538,11 +562,7 @@ def _run_worker_chain(
         dry_payload = json.loads(json.dumps(change_set))
         dry_payload["dry_run"] = True
         dry_payload["port"] = int(ready["port"])
-        dry_result = asyncio.run(
-            mcp_server.apply_worker_changes(
-                mcp_server.ApplyWorkerChangesInput.model_validate(dry_payload)
-            )
-        )
+        dry_result = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(dry_payload)))
         result["responses"]["apply_worker_changes_dry_run"] = dry_result
         _check(result, "dry-run status ok", dry_result.get("status") == "ok", dry_result)
         _check(result, "dry-run applies nothing", dry_result.get("applied") == [], dry_result)
@@ -563,11 +583,7 @@ def _run_worker_chain(
         apply_payload = json.loads(json.dumps(change_set))
         apply_payload["dry_run"] = False
         apply_payload["port"] = int(ready["port"])
-        apply_result = asyncio.run(
-            mcp_server.apply_worker_changes(
-                mcp_server.ApplyWorkerChangesInput.model_validate(apply_payload)
-            )
-        )
+        apply_result = asyncio.run(mcp_server.apply_worker_changes(ApplyParams(apply_payload)))
         result["responses"]["apply_worker_changes_destructive"] = apply_result
         _check(result, "destructive apply status ok", apply_result.get("status") == "ok", apply_result)
         _check(result, "destructive apply applied all operations", len(apply_result.get("applied") or []) == len(change_set.get("operations") or []), apply_result)

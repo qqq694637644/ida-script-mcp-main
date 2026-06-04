@@ -25,7 +25,58 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+try:
+    from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+except Exception:  # pragma: no cover - exercised by guest payloads without pydantic.
+    StrictBool = bool  # type: ignore[assignment]
+
+    def ConfigDict(**kwargs: Any) -> dict[str, Any]:  # type: ignore[no-redef]
+        return dict(kwargs)
+
+    def Field(default: Any = None, **_kwargs: Any) -> Any:  # type: ignore[no-redef]
+        return default
+
+    def model_validator(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
+        def decorator(func):
+            return func
+
+        return decorator
+
+    class BaseModel:  # type: ignore[no-redef]
+        """Tiny fallback used only for importing server helpers in guest payloads."""
+
+        def __init__(self, **kwargs: Any):
+            annotations: dict[str, Any] = {}
+            for cls in reversed(type(self).__mro__):
+                annotations.update(getattr(cls, "__annotations__", {}))
+            for name in annotations:
+                if name == "model_config":
+                    continue
+                if name in kwargs:
+                    setattr(self, name, kwargs.pop(name))
+                elif hasattr(type(self), name):
+                    setattr(self, name, getattr(type(self), name))
+            if kwargs:
+                raise ValueError(f"{type(self).__name__} forbids extra fields: {sorted(kwargs)!r}")
+
+        @classmethod
+        def model_validate(cls, data: Any):
+            if isinstance(data, cls):
+                return data
+            if not isinstance(data, dict):
+                raise ValueError(f"{cls.__name__} requires a dict")
+            return cls(**data)
+
+        def model_dump(self, mode: str = "json", exclude: set[str] | None = None) -> dict[str, Any]:
+            exclude = exclude or set()
+            annotations: dict[str, Any] = {}
+            for cls in reversed(type(self).__mro__):
+                annotations.update(getattr(cls, "__annotations__", {}))
+            return {
+                name: getattr(self, name)
+                for name in annotations
+                if name != "model_config" and name not in exclude and hasattr(self, name)
+            }
 
 from .change_protocol import ApplyChangesRequest
 from .isolated_manager import IsolatedExecutionManager
