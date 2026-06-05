@@ -1837,7 +1837,10 @@ _GUEST_IDA_API_TEST_TEMPLATE = dedent(
         result["responses"]["metadata"] = metadata["body"]
         _check(result, "metadata includes input path", bool(metadata["body"].get("input_file_path")), metadata["body"])
         _check(result, "metadata includes database path", "database_path" in metadata["body"], metadata["body"])
-        _check(result, "metadata includes dirty state", "dirty_state_known" in metadata["body"], metadata["body"])
+        if IDA_API_TEST_MODE == "apply_changes":
+            _check(result, "metadata includes dirty state", "dirty_state_known" in metadata["body"], metadata["body"])
+        elif "dirty_state_known" not in metadata["body"]:
+            result["warnings"].append("metadata does not expose dirty_state_known in this plugin version")
         _stage("metadata_done")
 
         _stage("functions_start")
