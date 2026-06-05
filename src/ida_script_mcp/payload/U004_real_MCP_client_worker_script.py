@@ -1,28 +1,22 @@
-"""Worker-side script for U004 real MCP client end-to-end testing.
+"""Script-path payload used by the real MCP client end-to-end smoke test.
 
-The script is executed through the real MCP `execute_idapython` tool. It records
-a simple comment change through `mcp_changes` so the test can call the real MCP
-`apply_worker_changes` tool in dry-run mode.
+This script is executed through the real MCP ``execute_idapython`` tool. It
+intentionally uses only the strict in-process execute subsystem and returns a
+small JSON-serializable result.
 """
 
 from __future__ import annotations
 
-import os
+import idaapi
+import idautils
 
+functions = list(idautils.Functions())
+selected_ea = int(functions[0]) if functions else 0
 
-def _required_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"{name} is required")
-    return value
-
-
-target_ea = int(_required_env("IDA_SCRIPT_MCP_U004_TARGET_EA"), 0)
-comment_text = _required_env("IDA_SCRIPT_MCP_U004_COMMENT")
-comment_ok = mcp_changes.comment(target_ea, comment_text, False)  # type: ignore[name-defined]
+print("u004 strict script_path execution ok")
 
 result = {
-    "target_ea": target_ea,
-    "comment_text": comment_text,
-    "comment_ok": bool(comment_ok),
+    "imagebase": int(idaapi.get_imagebase()),
+    "function_count": len(functions),
+    "selected_ea": selected_ea,
 }
