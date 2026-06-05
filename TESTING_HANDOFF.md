@@ -1,6 +1,6 @@
 # 测试架构与接手方案
 
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 这个文件是给后续 AI 或维护者接手测试工作的入口。它必须回答四个问题：
 
@@ -18,6 +18,18 @@ Last updated: 2026-06-04
 | `PORTABLE_WORKFLOW_DEVELOPMENT_LESSONS.md` | 可迁移到其他仓库的 workflow 开发经验。 |
 | `TESTED.md` | 已经测过的范围和证据。 |
 | `UNTESTED.md` | 未测 backlog。测试通过后从这里移到 `TESTED.md`。 |
+
+## 0. Workflow 维护硬规则
+
+后续维护这套 HostMachine / disposable guest VM / IDA 实机测试时，永远优先用 Python 文件开发和承载逻辑，不要把主要逻辑写进 PowerShell、cmd、workflow `run:` 多行命令或临时拼接命令里。
+
+必须遵守：
+
+- workflow 只能做 checkout、调用 Python 文件、上传 artifact 这类胶水动作；复杂分支、参数解析、payload 生成、controller 参数组装必须放进仓库里的 `.py` 文件。
+- 一个测试入口对应一个可 review 的 Python 脚本或 payload builder；不要把一个测试的大段逻辑写成 workflow 里的 ps1/cmd 片段。
+- Python 用文件执行，允许 workflow 用一行命令调用脚本文件，例如 `py -3 src\ida_script_mcp\disposable_vm\workflow_runner.py`；不要把核心代码直接塞到命令行参数或 here-doc 里。
+- 新增或修改 workflow 行为时，必须给 Python 文件加本地单测、`py_compile` 或至少 `compileall`，确保代码能在提交前被检查。
+- 不要再引入长 PowerShell。PowerShell 只允许在无法避免的极薄胶水场景使用；当前规则是不要用它写测试逻辑。
 
 ## 1. 产品整体测试架构
 
@@ -78,8 +90,9 @@ worker 进程隔离不是完整安全沙箱，不能把它描述成强沙箱
 GitHub workflow_dispatch
   -> HostMachine self-hosted Windows runner
       -> checkout repository
-      -> py -3 -m pip install -e .
-      -> start host controller on 0.0.0.0:8766
+      -> py -3 src\ida_script_mcp\disposable_vm\workflow_install.py
+      -> py -3 src\ida_script_mcp\disposable_vm\workflow_runner.py
+      -> workflow_runner.py starts host controller on 0.0.0.0:8766
       -> optional: run C:\Users\alion\Scripts\vmware_restore_test1.py --gui
       -> wait guest agent POST /hello
       -> serve dynamic payload at /payload/{job_id}
