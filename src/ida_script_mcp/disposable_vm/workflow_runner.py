@@ -74,36 +74,78 @@ class WorkflowInputs:
     result_dir: Path
 
 
-def _env(name: str, default: str = "") -> str:
-    value = os.environ.get(f"IDA_MCP_{name}", "")
-    return value if value.strip() else default
+def _configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 
-def _parse_bool(name: str, default: bool) -> bool:
-    raw = _env(name, str(default)).strip().lower()
+def _read_github_event_inputs() -> dict[str, object]:
+    """Read workflow_dispatch inputs from GitHub's event JSON file.
+
+    This keeps `.github/workflows/*.yml` thin: the workflow does not need to
+    expand inputs into a large env block or encode branching logic.
+    """
+
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return {}
+    path = Path(event_path)
+    if not path.is_file():
+        return {}
+    try:
+        event = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Cannot read GitHub event JSON from {path}: {exc}") from exc
+    inputs = event.get("inputs")
+    if not isinstance(inputs, dict):
+        return {}
+    return inputs
+
+
+def _input_value(inputs: dict[str, object], key: str, default: str = "") -> str:
+    value = inputs.get(key)
+    if value is None:
+        # Environment fallback is intentionally only for local tests and manual
+        # debugging. The workflow itself reads from GITHUB_EVENT_PATH.
+        value = os.environ.get(f"IDA_MCP_{key.upper()}")
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return default
+    text = str(value)
+    return text if text.strip() else default
+
+
+def _parse_bool(inputs: dict[str, object], name: str, default: bool) -> bool:
+    raw = _input_value(inputs, name, str(default)).strip().lower()
     if raw in {"1", "true", "yes", "y", "on"}:
         return True
     if raw in {"0", "false", "no", "n", "off"}:
         return False
-    raise ValueError(f"IDA_MCP_{name} must be boolean-like, got {raw!r}")
+    raise ValueError(f"workflow input {name!r} must be boolean-like, got {raw!r}")
 
 
-def _parse_int(name: str, default: int) -> int:
-    raw = _env(name, str(default)).strip()
+def _parse_int(inputs: dict[str, object], name: str, default: int) -> int:
+    raw = _input_value(inputs, name, str(default)).strip()
     try:
         return int(raw)
     except ValueError as exc:
-        raise ValueError(f"IDA_MCP_{name} must be an integer, got {raw!r}") from exc
+        raise ValueError(f"workflow input {name!r} must be an integer, got {raw!r}") from exc
 
 
-def _parse_json_string_list(name: str, default: str = "[]") -> tuple[str, ...]:
-    raw = _env(name, default)
+def _parse_json_string_list(inputs: dict[str, object], name: str, default: str = "[]") -> tuple[str, ...]:
+    raw = _input_value(inputs, name, default)
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"IDA_MCP_{name} must be a JSON array of strings: {raw!r}") from exc
+        raise ValueError(f"workflow input {name!r} must be a JSON array of strings: {raw!r}") from exc
     if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
-        raise ValueError(f"IDA_MCP_{name} must be a JSON array of strings: {raw!r}")
+        raise ValueError(f"workflow input {name!r} must be a JSON array of strings: {raw!r}")
     return tuple(item for item in parsed if item.strip())
 
 
@@ -114,29 +156,30 @@ def _default_result_dir() -> Path:
 
 
 def inputs_from_env() -> WorkflowInputs:
-    port = _parse_int("PORT", 8766)
-    controller_url = _env("CONTROLLER_URL", DEFAULT_CONTROLLER_URL)
+    inputs = _read_github_event_inputs()
+    port = _parse_int(inputs, "port", 8766)
+    controller_url = _input_value(inputs, "controller_url", DEFAULT_CONTROLLER_URL)
     if not controller_url.strip():
         controller_url = f"http://192.168.1.249:{port}"
 
-    result_dir_raw = _env("RESULT_DIR", "")
+    result_dir_raw = _input_value(inputs, "result_dir", "")
     result_dir = Path(result_dir_raw) if result_dir_raw else _default_result_dir()
 
     return WorkflowInputs(
         controller_url=controller_url.rstrip("/"),
         port=port,
-        restore_script=_env("RESTORE_SCRIPT", DEFAULT_RESTORE_SCRIPT),
-        restore_gui=_parse_bool("RESTORE_GUI", True),
-        run_vmware_restore=_parse_bool("RUN_VMWARE_RESTORE", True),
-        restore_extra_args=_parse_json_string_list("RESTORE_EXTRA_ARGS_JSON"),
-        task_action=_env("TASK_ACTION", "noop"),
-        ida_dir=_env("IDA_DIR", DEFAULT_GUEST_IDA_DIR),
-        dll_path=_env("DLL_PATH", DEFAULT_DLL_PATH),
-        ida_timeout_seconds=_parse_int("IDA_TIMEOUT_SECONDS", 180),
-        ida_api_test_mode=_env("IDA_API_TEST_MODE", "basic"),
-        command_json=_env("COMMAND_JSON", DEFAULT_COMMAND_JSON),
-        connect_timeout_seconds=_parse_int("CONNECT_TIMEOUT_SECONDS", 600),
-        run_timeout_seconds=_parse_int("RUN_TIMEOUT_SECONDS", 1800),
+        restore_script=_input_value(inputs, "restore_script", DEFAULT_RESTORE_SCRIPT),
+        restore_gui=_parse_bool(inputs, "restore_gui", True),
+        run_vmware_restore=_parse_bool(inputs, "run_vmware_restore", True),
+        restore_extra_args=_parse_json_string_list(inputs, "restore_extra_args_json"),
+        task_action=_input_value(inputs, "task_action", "noop"),
+        ida_dir=_input_value(inputs, "ida_dir", DEFAULT_GUEST_IDA_DIR),
+        dll_path=_input_value(inputs, "dll_path", DEFAULT_DLL_PATH),
+        ida_timeout_seconds=_parse_int(inputs, "ida_timeout_seconds", 180),
+        ida_api_test_mode=_input_value(inputs, "ida_api_test_mode", "basic"),
+        command_json=_input_value(inputs, "command_json", DEFAULT_COMMAND_JSON),
+        connect_timeout_seconds=_parse_int(inputs, "connect_timeout_seconds", 600),
+        run_timeout_seconds=_parse_int(inputs, "run_timeout_seconds", 1800),
         result_dir=result_dir,
     )
 
@@ -355,6 +398,7 @@ def _controller_args(inputs: WorkflowInputs) -> list[str]:
 
 
 def main() -> int:
+    _configure_stdio()
     inputs = inputs_from_env()
     inputs.result_dir.mkdir(parents=True, exist_ok=True)
     print(f"Using controller_url={inputs.controller_url}", flush=True)

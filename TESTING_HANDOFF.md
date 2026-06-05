@@ -25,9 +25,10 @@ Last updated: 2026-06-05
 
 必须遵守：
 
-- workflow 只能做 checkout、调用 Python 文件、上传 artifact 这类胶水动作；复杂分支、参数解析、payload 生成、controller 参数组装必须放进仓库里的 `.py` 文件。
+- workflow 只能做 checkout、用 `shell: python` 调用 Python 文件、上传 artifact 这类胶水动作；复杂分支、参数解析、payload 生成、controller 参数组装必须放进仓库里的 `.py` 文件。
 - 一个测试入口对应一个可 review 的 Python 脚本或 payload builder；不要把一个测试的大段逻辑写成 workflow 里的 ps1/cmd 片段。
-- Python 用文件执行，允许 workflow 用一行命令调用脚本文件，例如 `py -3 src\ida_script_mcp\disposable_vm\workflow_runner.py`；不要把核心代码直接塞到命令行参数或 here-doc 里。
+- Python 用文件执行；workflow 里的 `run:` 只能用极薄的 Python `runpy.run_path(...)` 去执行仓库 `.py` 文件。不要用 `shell: cmd`、`shell: pwsh`，不要用一大段 `env:` 手工展开 workflow inputs。
+- workflow inputs 由 Python 代码从 GitHub 自动提供的 `GITHUB_EVENT_PATH` 读取；不要在 YAML 里维护 `IDA_MCP_*` 这类手工映射。
 - 新增或修改 workflow 行为时，必须给 Python 文件加本地单测、`py_compile` 或至少 `compileall`，确保代码能在提交前被检查。
 - 不要再引入长 PowerShell。PowerShell 只允许在无法避免的极薄胶水场景使用；当前规则是不要用它写测试逻辑。
 
@@ -90,8 +91,8 @@ worker 进程隔离不是完整安全沙箱，不能把它描述成强沙箱
 GitHub workflow_dispatch
   -> HostMachine self-hosted Windows runner
       -> checkout repository
-      -> py -3 src\ida_script_mcp\disposable_vm\workflow_install.py
-      -> py -3 src\ida_script_mcp\disposable_vm\workflow_runner.py
+      -> shell: python -> runpy.run_path("src/ida_script_mcp/disposable_vm/workflow_install.py")
+      -> shell: python -> runpy.run_path("src/ida_script_mcp/disposable_vm/workflow_runner.py")
       -> workflow_runner.py starts host controller on 0.0.0.0:8766
       -> optional: run C:\Users\alion\Scripts\vmware_restore_test1.py --gui
       -> wait guest agent POST /hello
