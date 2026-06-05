@@ -23,12 +23,15 @@ Last updated: 2026-06-05
 
 后续维护这套 HostMachine / disposable guest VM / IDA 实机测试时，永远优先用 Python 文件开发和承载逻辑，不要把主要逻辑写进 PowerShell、cmd、workflow `run:` 多行命令或临时拼接命令里。
 
+这套测试框架可以继续整理成“项目模板”：HostMachine 自托管 runner、disposable guest VM、guest agent、host controller、payload builder、artifact 证据归档、handoff 文档都可以作为模板骨架。以后新项目需要实机/虚拟机端到端测试时，可以先复制这套骨架，再只替换项目自己的 payload builder、测试断言、样本路径和 workflow inputs。模板化时要保持下面的硬规则不变。
+
 必须遵守：
 
 - workflow 只能做 checkout、用 `shell: python` 调用 Python 文件、上传 artifact 这类胶水动作；复杂分支、参数解析、payload 生成、controller 参数组装必须放进仓库里的 `.py` 文件。
 - 一个测试入口对应一个可 review 的 Python 脚本或 payload builder；不要把一个测试的大段逻辑写成 workflow 里的 ps1/cmd 片段。
 - Python 用文件执行；workflow 里的 `run:` 只能用极薄的 Python `runpy.run_path(...)` 去执行仓库 `.py` 文件。不要用 `shell: cmd`、`shell: pwsh`，不要用一大段 `env:` 手工展开 workflow inputs。
 - workflow inputs 由 Python 代码从 GitHub 自动提供的 `GITHUB_EVENT_PATH` 读取；不要在 YAML 里维护 `IDA_MCP_*` 这类手工映射。
+- Python 拉取任何三方库时必须显式加代理参数：`--proxy http://192.168.1.249:10810`。不要写裸 `pip install`、不要依赖环境变量隐式代理。标准例子：`py -3.11 -m pip install -r requirements.txt --proxy http://192.168.1.249:10810`。
 - 新增或修改 workflow 行为时，必须给 Python 文件加本地单测、`py_compile` 或至少 `compileall`，确保代码能在提交前被检查。
 - 不要再引入长 PowerShell。PowerShell 只允许在无法避免的极薄胶水场景使用；当前规则是不要用它写测试逻辑。
 
