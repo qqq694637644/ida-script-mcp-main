@@ -476,6 +476,7 @@ def _collect_database_info() -> dict[str, Any]:
         "port": instance_registry.port,
         "database": None,
         "database_path": None,
+        "input_file_path": None,
         "platform": sys.platform,
     }
 
@@ -487,7 +488,9 @@ def _collect_database_info() -> dict[str, Any]:
     except Exception:
         pass
     try:
-        info["database_path"] = idaapi.get_input_file_path()
+        input_file_path = idaapi.get_input_file_path()
+        info["database_path"] = input_file_path
+        info["input_file_path"] = input_file_path
     except Exception:
         pass
     try:
