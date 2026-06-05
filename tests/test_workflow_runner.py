@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from ida_script_mcp.disposable_vm.workflow_runner import (  # noqa: E402
     DEFAULT_COMMAND_JSON,
     WorkflowInputs,
     _controller_args,
+    inputs_from_env,
 )
 
 
@@ -61,6 +63,52 @@ def test_workflow_yaml_uses_python_files_not_powershell():
     workflow = Path(".github/workflows/disposable-vm-guest-agent-smoke.yml").read_text(encoding="utf-8")
 
     assert "shell: pwsh" not in workflow
+    assert "shell: cmd" not in workflow
+    assert "IDA_MCP_" not in workflow
     assert "$ErrorActionPreference" not in workflow
+    assert "shell: python" in workflow
+    assert "runpy.run_path" in workflow
     assert "workflow_runner.py" in workflow
     assert "workflow_install.py" in workflow
+
+
+def test_workflow_runner_reads_github_event_inputs(tmp_path, monkeypatch):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "inputs": {
+                    "controller_url": "http://example.invalid:9000",
+                    "port": "9000",
+                    "restore_script": r"C:\restore.py",
+                    "restore_gui": "false",
+                    "run_vmware_restore": "false",
+                    "restore_extra_args_json": '["--snapshot", "test"]',
+                    "task_action": "command",
+                    "ida_dir": r"C:\IDA",
+                    "dll_path": r"C:\sample.dll",
+                    "ida_timeout_seconds": "11",
+                    "ida_api_test_mode": "basic",
+                    "command_json": '["python", "-V"]',
+                    "connect_timeout_seconds": "12",
+                    "run_timeout_seconds": "13",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+
+    parsed = inputs_from_env()
+
+    assert parsed.controller_url == "http://example.invalid:9000"
+    assert parsed.port == 9000
+    assert parsed.restore_gui is False
+    assert parsed.run_vmware_restore is False
+    assert parsed.restore_extra_args == ("--snapshot", "test")
+    assert parsed.task_action == "command"
+    assert parsed.ida_timeout_seconds == 11
+    assert parsed.connect_timeout_seconds == 12
+    assert parsed.run_timeout_seconds == 13
+    assert parsed.result_dir == tmp_path / "ida-script-mcp-disposable-vm"

@@ -103,29 +103,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install project package
-        shell: cmd
-        run: py -3 src\ida_script_mcp\disposable_vm\workflow_install.py
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("src/ida_script_mcp/disposable_vm/workflow_install.py", run_name="__main__")
 
       - name: Run disposable VM guest agent smoke
-        shell: cmd
-        env:
-          PYTHONIOENCODING: utf-8
-          IDA_MCP_CONTROLLER_URL: ${{ inputs.controller_url }}
-          IDA_MCP_PORT: ${{ inputs.port }}
-          IDA_MCP_RESTORE_SCRIPT: ${{ inputs.restore_script }}
-          IDA_MCP_RESTORE_GUI: ${{ inputs.restore_gui }}
-          IDA_MCP_RUN_VMWARE_RESTORE: ${{ inputs.run_vmware_restore }}
-          IDA_MCP_RESTORE_EXTRA_ARGS_JSON: '${{ inputs.restore_extra_args_json }}'
-          IDA_MCP_TASK_ACTION: ${{ inputs.task_action }}
-          IDA_MCP_IDA_DIR: ${{ inputs.ida_dir }}
-          IDA_MCP_DLL_PATH: ${{ inputs.dll_path }}
-          IDA_MCP_IDA_TIMEOUT_SECONDS: ${{ inputs.ida_timeout_seconds }}
-          IDA_MCP_IDA_API_TEST_MODE: ${{ inputs.ida_api_test_mode }}
-          IDA_MCP_COMMAND_JSON: '${{ inputs.command_json }}'
-          IDA_MCP_CONNECT_TIMEOUT_SECONDS: ${{ inputs.connect_timeout_seconds }}
-          IDA_MCP_RUN_TIMEOUT_SECONDS: ${{ inputs.run_timeout_seconds }}
-          IDA_MCP_RESULT_DIR: ${{ runner.temp }}\ida-script-mcp-disposable-vm
-        run: py -3 src\ida_script_mcp\disposable_vm\workflow_runner.py
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path("src/ida_script_mcp/disposable_vm/workflow_runner.py", run_name="__main__")
 
       - name: Upload disposable VM smoke logs
         if: always()
