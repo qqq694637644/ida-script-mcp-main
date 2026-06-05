@@ -38,15 +38,23 @@ except ImportError:  # pragma: no cover - standalone IDA plugin support-file imp
         sys.path.insert(0, str(plugin_dir))
 
     try:
-        from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
-        from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+        from ida_script_mcp_support.execution import ScriptExecutor  # type: ignore[no-redef]
+        from ida_script_mcp_support.protocol import (  # type: ignore[no-redef]
             ExecuteRequest,
             ExecuteResult,
             ExecutionError,
         )
     except ImportError:
-        from execution import ScriptExecutor  # type: ignore[no-redef]
-        from protocol import ExecuteRequest, ExecuteResult, ExecutionError  # type: ignore[no-redef]
+        try:
+            from ida_script_mcp_execution import ScriptExecutor  # type: ignore[no-redef]
+            from ida_script_mcp_protocol import (  # type: ignore[no-redef]
+                ExecuteRequest,
+                ExecuteResult,
+                ExecutionError,
+            )
+        except ImportError:
+            from execution import ScriptExecutor  # type: ignore[no-redef]
+            from protocol import ExecuteRequest, ExecuteResult, ExecutionError  # type: ignore[no-redef]
 
 PLUGIN_NAME = "IDA-Script-MCP"
 DEFAULT_HOST = "127.0.0.1"
@@ -468,6 +476,7 @@ def _collect_database_info() -> dict[str, Any]:
         "port": instance_registry.port,
         "database": None,
         "database_path": None,
+        "input_file_path": None,
         "platform": sys.platform,
     }
 
@@ -479,7 +488,9 @@ def _collect_database_info() -> dict[str, Any]:
     except Exception:
         pass
     try:
-        info["database_path"] = idaapi.get_input_file_path()
+        input_file_path = idaapi.get_input_file_path()
+        info["database_path"] = input_file_path
+        info["input_file_path"] = input_file_path
     except Exception:
         pass
     try:

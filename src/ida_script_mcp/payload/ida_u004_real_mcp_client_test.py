@@ -1,4 +1,4 @@
-"""Build the U004 real MCP client end-to-end guest payload."""
+"Build the real MCP client end-to-end guest payload for the strict execute plugin."
 
 from __future__ import annotations
 
@@ -15,14 +15,56 @@ from .ida_plugin_install import (
     LEGACY_ROOT_SUPPORT_FILES,
     _read_install_files,
 )
-from .ida_worker_chain_test import _b64_map, _read_runtime_package_files, _sha256_map
 
 PAYLOAD_SCRIPT_NAME = "U004_real_MCP_client_end-to-end.py"
 WORKER_SCRIPT_NAME = "U004_real_MCP_client_worker_script.py"
+RUNTIME_PACKAGE_FILES = (
+    "__init__.py",
+    "server.py",
+    "protocol.py",
+    "execution.py",
+)
+
+
+def _package_source_dir(source_root: Path | None = None) -> Path:
+    if source_root is not None:
+        return source_root
+    return Path(__file__).resolve().parents[1]
 
 
 def _payload_source_dir() -> Path:
     return Path(__file__).resolve().parent
+
+
+def _read_runtime_package_files(source_root: Path | None = None) -> dict[str, bytes]:
+    """Read only the runtime modules needed by the strict MCP server."""
+
+    package_dir = _package_source_dir(source_root)
+    payload: dict[str, bytes] = {}
+    missing: list[str] = []
+    for relative_name in RUNTIME_PACKAGE_FILES:
+        source_path = package_dir / relative_name
+        if not source_path.is_file():
+            missing.append(str(source_path))
+            continue
+        payload[f"ida_script_mcp/{relative_name}"] = source_path.read_bytes()
+    if missing:
+        raise FileNotFoundError("Missing real MCP runtime package source files: " + ", ".join(missing))
+    return payload
+
+
+def _b64_map(files: dict[str, bytes]) -> dict[str, str]:
+    return {
+        destination: base64.b64encode(content).decode("ascii")
+        for destination, content in sorted(files.items())
+    }
+
+
+def _sha256_map(files: dict[str, bytes]) -> dict[str, str]:
+    return {
+        destination: hashlib.sha256(content).hexdigest()
+        for destination, content in sorted(files.items())
+    }
 
 
 def build_guest_u004_real_mcp_client_test_script(
@@ -32,7 +74,7 @@ def build_guest_u004_real_mcp_client_test_script(
     ida_timeout_seconds: int = DEFAULT_IDA_TIMEOUT_SECONDS,
     source_root: Path | None = None,
 ) -> str:
-    """Build a standalone guest script for U004 real MCP client testing."""
+    """Build a standalone guest script for strict real MCP client testing."""
 
     install_files = _read_install_files(source_root)
     runtime_files = _read_runtime_package_files(source_root)
@@ -71,7 +113,7 @@ def build_guest_u004_real_mcp_client_test_script(
         if token in template
     ]
     if unreplaced:
-        raise RuntimeError("Unreplaced U004 payload placeholders: " + ", ".join(unreplaced))
+        raise RuntimeError("Unreplaced real MCP payload placeholders: " + ", ".join(unreplaced))
     return template
 
 
@@ -96,7 +138,7 @@ def main(argv: list[str] | None = None) -> None:
         ),
         encoding="utf-8",
     )
-    print(f"Wrote U004 real MCP client guest payload: {output_path}")
+    print(f"Wrote real MCP client guest payload: {output_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover

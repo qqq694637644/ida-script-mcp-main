@@ -26,16 +26,15 @@ RUNTIME_FILES_B64 = "__RUNTIME_FILES_B64_JSON__"
 RUNTIME_EXPECTED_SHA256 = "__RUNTIME_EXPECTED_SHA256_JSON__"
 WORKER_SCRIPT_B64 = "__WORKER_SCRIPT_B64_JSON__"
 WORKER_SCRIPT_SHA256 = "__WORKER_SCRIPT_SHA256_JSON__"
-WORK_DIR = Path(tempfile.mkdtemp(prefix="ida-script-mcp-u004-real-client-"))
+WORK_DIR = Path(tempfile.mkdtemp(prefix="ida-script-mcp-real-client-"))
 READY_PATH = WORK_DIR / "ida_ready.json"
 HEARTBEAT_PATH = WORK_DIR / "heartbeat.ndjson"
-RESULT_PATH = WORK_DIR / "U004_real_MCP_client_end-to-end_result.json"
+RESULT_PATH = WORK_DIR / "real_MCP_client_end-to-end_result.json"
 IDA_LOG_PATH = WORK_DIR / "ida.log"
 PIP_PROXY = "http://192.168.1.249:10810"
-MCP_HTTP_PORT = 8765
 THIRD_PARTY_REQUIREMENTS = ("mcp>=1.25.0", "pydantic>=2.0.0")
 
-BOOTSTRAP_TEMPLATE = r'''
+BOOTSTRAP_TEMPLATE = r"""
 from __future__ import annotations
 
 import json
@@ -82,37 +81,6 @@ def _ida_database_path(idaapi_module, ida_loader_module):
     return ""
 
 
-def _save_database(idaapi_module, ida_loader_module):
-    database_path = _ida_database_path(idaapi_module, ida_loader_module)
-    if not database_path:
-        raise RuntimeError("Cannot resolve saved IDB/I64 path before U004 test")
-    _stage("database_save_start", {"database_path": database_path})
-    saver = getattr(ida_loader_module, "save_database", None)
-    if saver is None:
-        saver = getattr(idaapi_module, "save_database", None)
-    if saver is None:
-        raise RuntimeError("IDA save_database API is unavailable")
-    try:
-        saved = saver(database_path, 0)
-    except TypeError:
-        saved = saver(database_path)
-    if saved is False:
-        raise RuntimeError(f"IDA save_database returned failure for {database_path}")
-    flusher = getattr(ida_loader_module, "flush_buffers", None)
-    if flusher is None:
-        flusher = getattr(idaapi_module, "flush_buffers", None)
-    if flusher is not None:
-        try:
-            flusher()
-        except Exception:
-            pass
-    path = Path(database_path)
-    if not path.is_file() or path.stat().st_size <= 0:
-        raise RuntimeError(f"Saved IDB/I64 path is unavailable after save: {database_path}")
-    _stage("database_save_done", {"database_path": database_path, "database_size": path.stat().st_size})
-    return database_path
-
-
 def main():
     try:
         _stage("ida_bootstrap_start")
@@ -123,7 +91,6 @@ def main():
         _stage("auto_wait_start")
         ida_auto.auto_wait()
         _stage("auto_wait_done")
-        _save_database(idaapi, ida_loader)
 
         if PLUGIN_DIR not in sys.path:
             sys.path.insert(0, PLUGIN_DIR)
@@ -153,10 +120,7 @@ def main():
             input_file_path = idaapi.get_input_file_path()
         except Exception:
             input_file_path = ""
-        try:
-            database_path = idaapi.get_path(idaapi.PATH_TYPE_IDB)
-        except Exception:
-            database_path = ""
+        database_path = _ida_database_path(idaapi, ida_loader)
 
         ready = {
             "status": "ready",
@@ -186,7 +150,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
+"""
 
 
 def _stage(name: str, detail: object | None = None) -> None:
@@ -197,7 +161,7 @@ def _stage(name: str, detail: object | None = None) -> None:
     with HEARTBEAT_PATH.open("a", encoding="utf-8") as output:
         output.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         output.write("\n")
-    print("U004_STAGE=" + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+    print("REAL_MCP_STAGE=" + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -258,8 +222,9 @@ def _install_plugin_files() -> Path:
         _write_bytes_atomic(path, content)
         digest = _sha256(path)
         if digest != PLUGIN_EXPECTED_SHA256[destination]:
-            raise RuntimeError(f"SHA-256 mismatch for {path}")
+            raise RuntimeError(f"SHA-256 mismatch for plugin file {path}")
         py_compile.compile(str(path), doraise=True)
+    _stage("plugin_files_install_done", {"plugin_dir": str(plugin_dir), "file_count": len(PLUGIN_FILES_B64)})
     return plugin_dir
 
 
@@ -280,12 +245,12 @@ def _install_runtime_package_files() -> Path:
 
 
 def _write_worker_script() -> Path:
-    worker_script = WORK_DIR / "U004_real_MCP_client_worker_script.py"
+    worker_script = WORK_DIR / "real_mcp_execute_script.py"
     content = base64.b64decode(WORKER_SCRIPT_B64.encode("ascii"))
     _write_bytes_atomic(worker_script, content)
     digest = _sha256(worker_script)
     if digest != WORKER_SCRIPT_SHA256:
-        raise RuntimeError("SHA-256 mismatch for U004 worker script")
+        raise RuntimeError("SHA-256 mismatch for real MCP execute script")
     py_compile.compile(str(worker_script), doraise=True)
     return worker_script
 
@@ -298,16 +263,8 @@ def _select_ida_executable(ida_dir: Path) -> Path:
     raise RuntimeError("No IDA executable found under " + str(ida_dir))
 
 
-def _select_worker_ida_executable(ida_dir: Path) -> Path:
-    for candidate in ("idat64.exe", "idat.exe", "ida64.exe", "ida.exe"):
-        path = ida_dir / candidate
-        if path.is_file():
-            return path
-    raise RuntimeError("No worker-capable IDA executable found under " + str(ida_dir))
-
-
 def _write_bootstrap(work_dir: Path, plugin_dir: Path, ready_path: Path, heartbeat_path: Path) -> Path:
-    bootstrap_path = work_dir / "U004_real_MCP_client_bootstrap.py"
+    bootstrap_path = work_dir / "real_mcp_client_bootstrap.py"
     bootstrap_text = BOOTSTRAP_TEMPLATE
     replacements = {
         "__READY_PATH_JSON__": json.dumps(str(ready_path)),
@@ -381,9 +338,15 @@ def _wait_for_ready(process: subprocess.Popen, ready_path: Path, ida_log_path: P
                 raise RuntimeError("IDA bootstrap failed: " + json.dumps(ready, ensure_ascii=False))
             return ready
         if process.poll() is not None:
-            raise RuntimeError("IDA exited before ready file was created: " + json.dumps({"returncode": process.returncode, "ida_log_tail": _tail(ida_log_path)}, ensure_ascii=False))
+            raise RuntimeError(
+                "IDA exited before ready file was created: "
+                + json.dumps({"returncode": process.returncode, "ida_log_tail": _tail(ida_log_path)}, ensure_ascii=False)
+            )
         time.sleep(0.5)
-    raise RuntimeError("Timed out waiting for IDA ready file: " + json.dumps({"ready_path": str(ready_path), "ida_log_tail": _tail(ida_log_path), "process_alive": process.poll() is None}, ensure_ascii=False))
+    raise RuntimeError(
+        "Timed out waiting for IDA ready file: "
+        + json.dumps({"ready_path": str(ready_path), "ida_log_tail": _tail(ida_log_path), "process_alive": process.poll() is None}, ensure_ascii=False)
+    )
 
 
 def _health_with_retry(base_url: str) -> dict:
@@ -402,7 +365,6 @@ def _ensure_mcp_dependencies(result: dict) -> None:
     try:
         importlib.import_module("mcp.client.stdio")
         importlib.import_module("mcp.client.session")
-        importlib.import_module("mcp.client.sse")
         importlib.import_module("pydantic")
         _stage("mcp_dependencies_already_available")
         result["dependency_install"] = {"needed": False}
@@ -429,7 +391,6 @@ def _ensure_mcp_dependencies(result: dict) -> None:
     importlib.invalidate_caches()
     importlib.import_module("mcp.client.stdio")
     importlib.import_module("mcp.client.session")
-    importlib.import_module("mcp.client.sse")
     importlib.import_module("pydantic")
     _stage("mcp_dependency_install_done")
 
@@ -469,15 +430,11 @@ def _tool_is_error(call_result) -> bool:
     return bool(raw.get("isError") or raw.get("is_error"))
 
 
-def _server_env(runtime_root: Path, worker_ida: Path, ready: dict) -> dict[str, str]:
+def _server_env(runtime_root: Path, ready: dict) -> dict[str, str]:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = str(runtime_root) if not existing_pythonpath else str(runtime_root) + os.pathsep + existing_pythonpath
-    env["IDA_SCRIPT_MCP_IDA_PATH"] = str(worker_ida)
-    env["IDA_SCRIPT_MCP_WORK_DIR"] = str(WORK_DIR / "U004_worker_jobs")
-    env["IDA_SCRIPT_MCP_KEEP_JOBS"] = "1"
     env["IDA_SCRIPT_MCP_PORT"] = str(int(ready["port"]))
-    env["IDA_SCRIPT_MCP_U004_COMMENT"] = "u004 real MCP client dry-run comment"
     return env
 
 
@@ -497,41 +454,29 @@ def _schema_contains_property(schema: object, property_name: str) -> bool:
     return False
 
 
-async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Path, worker_script: Path, result: dict) -> None:
+async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_script: Path, result: dict) -> None:
     from mcp.client.session import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
-    preselected_functions = _json_request(
-        "POST",
-        str(ready["base_url"]),
-        "/functions",
-        {"offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True},
-        expected_status=200,
-        timeout=10,
-    )
-    preselected_function_list = preselected_functions["body"].get("functions") or []
-    _check(result, "U004 preselects target function before MCP server start", bool(preselected_function_list), preselected_functions["body"])
-    target_ea = int(preselected_function_list[0]["start_ea"])
-    target_hex = hex(target_ea)
-
-    env = _server_env(runtime_root, worker_ida, ready)
-    env["IDA_SCRIPT_MCP_U004_TARGET_EA"] = target_hex
+    port = int(ready["port"])
+    env = _server_env(runtime_root, ready)
     server_parameters = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "ida_script_mcp.server", "--ida-port", str(int(ready["port"])), "--transport", "stdio"],
+        args=["-m", "ida_script_mcp.server", "--ida-port", str(port), "--transport", "stdio"],
         env=env,
         cwd=str(WORK_DIR),
         encoding="utf-8",
         encoding_error_handler="replace",
     )
     _stage("mcp_stdio_client_start", {"command": server_parameters.command, "args": server_parameters.args})
-    observed: dict = {"transport": "stdio", "tool_results": {}, "preselected_target": target_hex}
+    observed: dict = {"transport": "stdio", "tool_results": {}}
     result["mcp_stdio"] = observed
 
     async with stdio_client(server_parameters) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             initialize_result = await session.initialize()
             observed["initialize"] = _model_dump(initialize_result)
+
             tools_result = await session.list_tools()
             tools_dump = _model_dump(tools_result)
             observed["list_tools"] = tools_dump
@@ -544,9 +489,9 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
                 "decompile_function",
                 "get_xrefs",
                 "execute_idapython",
-                "apply_worker_changes",
             }
-            _check(result, "stdio list_tools includes required tools", required_tools.issubset(set(tool_names)), tool_names)
+            _check(result, "stdio list_tools includes strict plugin tools", required_tools.issubset(set(tool_names)), tool_names)
+            _check(result, "stdio list_tools excludes removed apply_worker_changes", "apply_worker_changes" not in set(tool_names), tool_names)
 
             def _schema_for(name: str) -> dict:
                 for tool in tools_dump.get("tools", []):
@@ -555,8 +500,7 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
                 return {}
 
             execute_schema = _schema_for("execute_idapython")
-            _check(result, "stdio execute_idapython schema has properties", bool(execute_schema.get("properties")), execute_schema)
-            _check(result, "stdio execute_idapython schema wraps params", "params" in execute_schema.get("properties", {}), execute_schema)
+            _check(result, "stdio execute_idapython schema has params wrapper", "params" in execute_schema.get("properties", {}), execute_schema)
             _check(result, "stdio execute_idapython schema includes timeout_seconds", _schema_contains_property(execute_schema, "timeout_seconds"), execute_schema)
 
             instances_call = await session.call_tool("list_ida_instances", {})
@@ -566,17 +510,18 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             _assert_tool_payload(result, "list_ida_instances", instances)
             _check(result, "stdio list_ida_instances sees IDA", int(instances.get("count", 0)) >= 1, instances)
 
-            db_call = await session.call_tool("get_ida_database_info", {"params": {"port": int(ready["port"])}})
+            db_call = await session.call_tool("get_ida_database_info", {"params": {"port": port}})
             _check(result, "stdio get_ida_database_info not error", not _tool_is_error(db_call), _model_dump(db_call))
             db_info = _tool_payload(db_call)
             observed["tool_results"]["get_ida_database_info"] = db_info
             _assert_tool_payload(result, "get_ida_database_info", db_info)
-            _check(result, "stdio db info clean before execute", db_info.get("dirty") is False, db_info)
-            _check(result, "stdio db info has database_sha256", bool(db_info.get("database_sha256")), db_info)
+            _check(result, "stdio db info has input_file_path", bool(db_info.get("input_file_path")), db_info)
+            _check(result, "stdio db info has database_path", "database_path" in db_info, db_info)
+            _check(result, "stdio db info has functions", int(db_info.get("function_count", 0)) > 0, db_info)
 
             functions_call = await session.call_tool(
                 "list_functions",
-                {"params": {"port": int(ready["port"]), "offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True}},
+                {"params": {"port": port, "offset": 0, "limit": 5, "include_thunks": True, "include_library_functions": True}},
             )
             _check(result, "stdio list_functions not error", not _tool_is_error(functions_call), _model_dump(functions_call))
             functions = _tool_payload(functions_call)
@@ -584,20 +529,47 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             _assert_tool_payload(result, "list_functions", functions)
             function_list = functions.get("functions") or []
             _check(result, "stdio list_functions returned functions", bool(function_list), functions)
+            _check(result, "stdio list_functions respects limit", int(functions.get("returned", 0)) <= 5, functions)
+
+            first_function = function_list[0]
+            target_ea = int(first_function["start_ea"])
+            target_hex = hex(target_ea)
+            result["selected_function"] = first_function
+
+            name_probe = str(first_function.get("name") or "")[:4]
+            if name_probe:
+                filtered_call = await session.call_tool(
+                    "list_functions",
+                    {"params": {"port": port, "offset": 0, "limit": 5, "name_contains": name_probe, "include_thunks": True, "include_library_functions": True}},
+                )
+                filtered = _tool_payload(filtered_call)
+                observed["tool_results"]["list_functions_name_filter"] = filtered
+                _check(result, "stdio list_functions name filter not error", not _tool_is_error(filtered_call), _model_dump(filtered_call))
+                _check(result, "stdio list_functions name filter accepted", "functions" in filtered, filtered)
+
+            offset_call = await session.call_tool(
+                "list_functions",
+                {"params": {"port": port, "offset": int(functions.get("total", 0)) + 1000, "limit": 5, "include_thunks": True, "include_library_functions": True}},
+            )
+            offset_page = _tool_payload(offset_call)
+            observed["tool_results"]["list_functions_offset_beyond_total"] = offset_page
+            _check(result, "stdio list_functions offset beyond total not error", not _tool_is_error(offset_call), _model_dump(offset_call))
+            _check(result, "stdio list_functions offset beyond total empty", offset_page.get("returned") == 0 and offset_page.get("functions") == [], offset_page)
 
             decompile_call = await session.call_tool(
                 "decompile_function",
-                {"params": {"port": int(ready["port"]), "address": target_hex, "include_disassembly": True}},
+                {"params": {"port": port, "address": target_hex, "include_disassembly": True}},
             )
             _check(result, "stdio decompile_function not error", not _tool_is_error(decompile_call), _model_dump(decompile_call))
             decompile = _tool_payload(decompile_call)
             observed["tool_results"]["decompile_function"] = decompile
             _assert_tool_payload(result, "decompile_function", decompile)
             _check(result, "stdio decompile_function found target", decompile.get("found") is True, decompile)
+            _check(result, "stdio decompile_function includes disassembly", isinstance(decompile.get("disassembly"), list), decompile)
 
             xrefs_call = await session.call_tool(
                 "get_xrefs",
-                {"params": {"port": int(ready["port"]), "address": target_hex, "direction": "to", "xref_kind": "all", "limit": 20}},
+                {"params": {"port": port, "address": target_hex, "direction": "to", "xref_kind": "all", "limit": 20}},
             )
             _check(result, "stdio get_xrefs not error", not _tool_is_error(xrefs_call), _model_dump(xrefs_call))
             xrefs = _tool_payload(xrefs_call)
@@ -605,149 +577,67 @@ async def _run_stdio_mcp_client(ready: dict, runtime_root: Path, worker_ida: Pat
             _assert_tool_payload(result, "get_xrefs", xrefs)
             _check(result, "stdio get_xrefs returned xrefs list", isinstance(xrefs.get("xrefs"), list), xrefs)
 
+            execute_code = (
+                "import idaapi, idautils\n"
+                "print('u004 execute code ok')\n"
+                "result = {\n"
+                "    'imagebase': int(idaapi.get_imagebase()),\n"
+                "    'function_count': len(list(idautils.Functions())),\n"
+                "}\n"
+            )
             execute_call = await session.call_tool(
                 "execute_idapython",
-                {
-                    "params": {
-                        "port": int(ready["port"]),
-                        "script_path": str(WORK_DIR / "U004_missing_source_for_real_MCP_client.py"),
-                        "capture_output": True,
-                        "timeout_seconds": 5,
-                        "collect_changes": True,
-                    }
-                },
+                {"params": {"port": port, "code": execute_code, "capture_output": True, "timeout_seconds": 10}},
             )
-            _check(result, "stdio execute_idapython not MCP error", not _tool_is_error(execute_call), _model_dump(execute_call))
+            _check(result, "stdio execute_idapython code not MCP error", not _tool_is_error(execute_call), _model_dump(execute_call))
             execute = _tool_payload(execute_call)
-            observed["tool_results"]["execute_idapython"] = execute
-            _assert_tool_payload(result, "execute_idapython", execute)
-            _check(result, "stdio execute_idapython returns structured result", execute.get("status") in {"source_error", "timeout"}, execute)
-            _check(result, "stdio execute_idapython isolated true", execute.get("isolated") is True, execute)
-            _check(
-                result,
-                "stdio execute_idapython structured error type",
-                (execute.get("error") or {}).get("type") in {"FileNotFoundError", "WorkerHardTimeout"},
-                execute,
-            )
-            if execute.get("status") == "timeout":
-                _check(result, "stdio execute_idapython timeout is hard timeout", execute.get("hard_timeout") is True, execute)
-                _check(result, "stdio execute_idapython timeout killed worker", execute.get("killed") is True, execute)
-            change_set = {
-                "schema_version": 1,
-                "job_id": "u004-dry-run-comment",
-                "database_fingerprint": {
-                    "input_file_path": db_info.get("input_file_path"),
-                    "database_path": db_info.get("database_path"),
-                    "root_filename": db_info.get("root_filename") or db_info.get("database"),
-                    "imagebase": db_info.get("imagebase"),
-                    "input_md5": db_info.get("input_md5"),
-                    "input_sha256": db_info.get("input_sha256"),
-                    "processor": db_info.get("processor"),
-                    "bitness": db_info.get("bitness"),
-                    "database_sha256": db_info.get("database_sha256"),
-                    "database_size": db_info.get("database_size"),
-                },
-                "operations": [
-                    {
-                        "op_id": "op-u004-comment",
-                        "op": "comment",
-                        "ea": target_ea,
-                        "source": "explicit_api",
-                        "confidence": "high",
-                        "text": "u004 real MCP client dry-run comment",
-                        "repeatable": False,
-                    }
-                ],
-            }
-            observed["change_set_summary"] = {
-                "job_id": change_set.get("job_id"),
-                "operation_count": len(change_set.get("operations") or []),
-                "operation_types": [operation.get("op") for operation in change_set.get("operations") or []],
-            }
+            observed["tool_results"]["execute_idapython_code"] = execute
+            _assert_tool_payload(result, "execute_idapython_code", execute)
+            _check(result, "stdio execute_idapython code status ok", execute.get("status") == "ok", execute)
+            _check(result, "stdio execute_idapython code captured stdout", "u004 execute code ok" in str(execute.get("stdout") or ""), execute)
+            _check(result, "stdio execute_idapython code returns function count", int((execute.get("result") or {}).get("function_count", 0)) > 0, execute)
 
-            dry_payload = json.loads(json.dumps(change_set))
-            dry_payload["dry_run"] = True
-            dry_payload["port"] = int(ready["port"])
-            apply_call = await session.call_tool("apply_worker_changes", {"params": dry_payload})
-            _check(result, "stdio apply_worker_changes not MCP error", not _tool_is_error(apply_call), _model_dump(apply_call))
-            apply_dry = _tool_payload(apply_call)
-            observed["tool_results"]["apply_worker_changes"] = apply_dry
-            _assert_tool_payload(result, "apply_worker_changes", apply_dry)
-            _check(result, "stdio apply_worker_changes dry-run status ok", apply_dry.get("status") == "ok", apply_dry)
-            _check(result, "stdio apply_worker_changes dry-run applies nothing", apply_dry.get("applied") == [], apply_dry)
-            _check(result, "stdio apply_worker_changes skips dry-run operation", len(apply_dry.get("skipped") or []) == 1, apply_dry)
-            _check(result, "stdio apply_worker_changes dry-run errors empty", apply_dry.get("errors") == [], apply_dry)
+            script_call = await session.call_tool(
+                "execute_idapython",
+                {"params": {"port": port, "script_path": str(worker_script), "capture_output": True, "timeout_seconds": 10}},
+            )
+            _check(result, "stdio execute_idapython script_path not MCP error", not _tool_is_error(script_call), _model_dump(script_call))
+            script_result = _tool_payload(script_call)
+            observed["tool_results"]["execute_idapython_script_path"] = script_result
+            _assert_tool_payload(result, "execute_idapython_script_path", script_result)
+            _check(result, "stdio execute_idapython script_path status ok", script_result.get("status") == "ok", script_result)
+            _check(result, "stdio execute_idapython script_path returns target", int((script_result.get("result") or {}).get("selected_ea", 0)) == target_ea, script_result)
+
+            error_call = await session.call_tool(
+                "execute_idapython",
+                {"params": {"port": port, "code": "raise ValueError('u004 script error')", "capture_output": True, "timeout_seconds": 5}},
+            )
+            _check(result, "stdio execute_idapython script_error not MCP error", not _tool_is_error(error_call), _model_dump(error_call))
+            error_result = _tool_payload(error_call)
+            observed["tool_results"]["execute_idapython_script_error"] = error_result
+            _check(result, "stdio execute_idapython script_error status", error_result.get("status") == "script_error", error_result)
+            _check(result, "stdio execute_idapython script_error type", (error_result.get("error") or {}).get("type") == "ValueError", error_result)
+
+            timeout_call = await session.call_tool(
+                "execute_idapython",
+                {"params": {"port": port, "code": "while True:\n    pass", "capture_output": True, "timeout_seconds": 1}},
+            )
+            _check(result, "stdio execute_idapython timeout not MCP error", not _tool_is_error(timeout_call), _model_dump(timeout_call))
+            timeout_result = _tool_payload(timeout_call)
+            observed["tool_results"]["execute_idapython_timeout"] = timeout_result
+            _check(result, "stdio execute_idapython timeout status", timeout_result.get("status") == "timeout", timeout_result)
+            _check(result, "stdio execute_idapython timeout error type", (timeout_result.get("error") or {}).get("type") == "ScriptExecutionTimeout", timeout_result)
 
     _stage("mcp_stdio_client_done", {"tools": observed.get("tool_names")})
 
 
-async def _run_sse_mcp_client(ready: dict, runtime_root: Path, worker_ida: Path, result: dict) -> None:
-    from mcp.client.session import ClientSession
-    from mcp.client.sse import sse_client
-
-    env = _server_env(runtime_root, worker_ida, ready)
-    command = [sys.executable, "-m", "ida_script_mcp.server", "--ida-port", str(int(ready["port"])), "--transport", "http", "--port", str(MCP_HTTP_PORT)]
-    _stage("mcp_http_server_start", {"command": command})
-    process = subprocess.Popen(
-        command,
-        cwd=str(WORK_DIR),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    result["mcp_http"] = {"transport": "http_sse", "port": MCP_HTTP_PORT, "pid": process.pid}
-    try:
-        url = f"http://127.0.0.1:{MCP_HTTP_PORT}/sse"
-        last_error = None
-        for attempt in range(20):
-            if process.poll() is not None:
-                break
-            try:
-                async with sse_client(url, timeout=2, sse_read_timeout=30) as (read_stream, write_stream):
-                    async with ClientSession(read_stream, write_stream) as session:
-                        initialize_result = await session.initialize()
-                        tools_result = await session.list_tools()
-                        instances_call = await session.call_tool("list_ida_instances", {})
-                        instances = _tool_payload(instances_call)
-                        result["mcp_http"].update(
-                            {
-                                "initialize": _model_dump(initialize_result),
-                                "list_tools": _model_dump(tools_result),
-                                "list_ida_instances": instances,
-                            }
-                        )
-                        _check(result, "http/sse list_ida_instances not error", not _tool_is_error(instances_call), _model_dump(instances_call))
-                        _check(result, "http/sse list_ida_instances sees IDA", int(instances.get("count", 0)) >= 1, instances)
-                        _stage("mcp_http_client_done", {"url": url})
-                        return
-            except Exception as exc:
-                last_error = f"{type(exc).__name__}: {exc}"
-                time.sleep(0.5)
-        stdout_tail, stderr_tail = _read_process_pipes_nonblocking(process)
-        raise RuntimeError(
-            "HTTP/SSE MCP client failed: "
-            + json.dumps(
-                {"url": url, "last_error": last_error, "returncode": process.poll(), "stdout_tail": stdout_tail, "stderr_tail": stderr_tail},
-                ensure_ascii=False,
-            )
-        )
-    finally:
-        _terminate_process(process)
-        stdout_tail, stderr_tail = _read_process_pipes_nonblocking(process)
-        result["mcp_http"].update({"returncode": process.poll(), "stdout_tail": stdout_tail[-4000:], "stderr_tail": stderr_tail[-4000:]})
-
-
-def _read_process_pipes_nonblocking(process: subprocess.Popen | None) -> tuple[str, str]:
-    if process is None:
-        return "", ""
-    try:
-        stdout, stderr = process.communicate(timeout=5)
-    except Exception:
-        return "", ""
-    return stdout or "", stderr or ""
+def _run_real_mcp(ready: dict, worker_script: Path, result: dict) -> None:
+    health = _health_with_retry(str(ready["base_url"]))
+    result["responses"]["health"] = health["body"]
+    _check(result, "IDA plugin health ok before MCP client", health["body"].get("plugin") == "IDA-Script-MCP", health["body"])
+    runtime_root = _install_runtime_package_files()
+    _ensure_mcp_dependencies(result)
+    asyncio.run(_run_stdio_mcp_client(ready, runtime_root, worker_script, result))
 
 
 def _read_process_pipes(process: subprocess.Popen) -> tuple[str, str]:
@@ -758,27 +648,20 @@ def _read_process_pipes(process: subprocess.Popen) -> tuple[str, str]:
     return stdout or "", stderr or ""
 
 
-def _run_u004(ready: dict, ida_dir: Path, worker_script: Path, result: dict) -> None:
-    health = _health_with_retry(str(ready["base_url"]))
-    result["responses"]["health"] = health["body"]
-    _check(result, "IDA plugin health ok before MCP client", health["body"].get("plugin") == "IDA-Script-MCP", health["body"])
-    runtime_root = _install_runtime_package_files()
-    worker_ida = _select_worker_ida_executable(ida_dir)
-    _ensure_mcp_dependencies(result)
-    asyncio.run(_run_stdio_mcp_client(ready, runtime_root, worker_ida, worker_script, result))
-    asyncio.run(_run_sse_mcp_client(ready, runtime_root, worker_ida, result))
-    metadata_after = _json_request("GET", str(ready["base_url"]), "/metadata", expected_status=200, timeout=5)
-    result["responses"]["metadata_after_u004"] = metadata_after["body"]
-    _check(result, "U004 leaves GUI database clean", metadata_after["body"].get("dirty") is False, metadata_after["body"])
-
-
 def main() -> int:
     ida_dir = Path(IDA_DIR)
     dll_path = Path(DLL_PATH)
     stdout = ""
     stderr = ""
     process = None
-    result: dict = {"status": "failed", "mode": "u004_real_mcp_client", "dll_path": DLL_PATH, "work_dir": str(WORK_DIR), "checks": [], "responses": {}}
+    result: dict = {
+        "status": "failed",
+        "mode": "real_mcp_client_strict_execute",
+        "dll_path": DLL_PATH,
+        "work_dir": str(WORK_DIR),
+        "checks": [],
+        "responses": {},
+    }
 
     try:
         _stage("validate_inputs_start", {"ida_dir": str(ida_dir), "dll_path": str(dll_path)})
@@ -800,9 +683,9 @@ def main() -> int:
 
         ready = _wait_for_ready(process, READY_PATH, IDA_LOG_PATH)
         result["ready"] = ready
-        _run_u004(ready, ida_dir, worker_script, result)
+        _run_real_mcp(ready, worker_script, result)
         result.update({"status": "passed", "ida_executable": str(ida_executable), "ida_log_path": str(IDA_LOG_PATH), "work_dir": str(WORK_DIR), "database_path": str(database_path)})
-        _stage("u004_tests_done", {"status": result.get("status")})
+        _stage("real_mcp_tests_done", {"status": result.get("status")})
     except Exception as exc:
         result["status"] = "failed"
         result["failed_stage"] = _tail(HEARTBEAT_PATH, max_chars=2000)
@@ -814,7 +697,7 @@ def main() -> int:
             result["ida_returncode"] = process.returncode
         result.update({"ida_log_tail": _tail(IDA_LOG_PATH), "heartbeat_tail": _tail(HEARTBEAT_PATH), "stdout_tail": stdout[-4000:], "stderr_tail": stderr[-4000:]})
         _write_json(RESULT_PATH, result)
-        print("U004_REAL_MCP_CLIENT_TEST_RESULT=" + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+        print("REAL_MCP_CLIENT_TEST_RESULT=" + json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
     return 0 if result.get("status") == "passed" else 1
 
 
@@ -823,7 +706,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:
         print(
-            "U004_REAL_MCP_CLIENT_TEST_ERROR="
+            "REAL_MCP_CLIENT_TEST_ERROR="
             + json.dumps({"type": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()}, ensure_ascii=False, sort_keys=True),
             file=sys.stderr,
         )

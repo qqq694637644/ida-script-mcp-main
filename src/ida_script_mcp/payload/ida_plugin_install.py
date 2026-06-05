@@ -14,6 +14,8 @@ PLUGIN_INSTALL_FILES = {
     "ida_plugin.py": "ida_script_mcp.py",
     "protocol.py": "ida_script_mcp_support/protocol.py",
     "execution.py": "ida_script_mcp_support/execution.py",
+}
+OPTIONAL_PLUGIN_INSTALL_FILES = {
     "change_protocol.py": "ida_script_mcp_support/change_protocol.py",
     "change_recorder.py": "ida_script_mcp_support/change_recorder.py",
 }
@@ -45,6 +47,10 @@ def _read_install_files(source_root: Path | None = None) -> dict[str, bytes]:
         payload[destination_name] = source_path.read_bytes()
     if missing:
         raise FileNotFoundError("Missing IDA plugin install source files: " + ", ".join(missing))
+    for source_name, destination_name in OPTIONAL_PLUGIN_INSTALL_FILES.items():
+        source_path = package_dir / source_name
+        if source_path.is_file():
+            payload[destination_name] = source_path.read_bytes()
     payload["ida_script_mcp_support/__init__.py"] = SUPPORT_PACKAGE_INIT
     return payload
 
@@ -65,6 +71,13 @@ def build_guest_ida_plugin_install_script(
         destination: hashlib.sha256(content).hexdigest()
         for destination, content in sorted(install_files.items())
     }
+    support_modules = [
+        "ida_script_mcp_support." + Path(destination).stem
+        for destination in sorted(install_files)
+        if destination.startswith("ida_script_mcp_support/")
+        and destination.endswith(".py")
+        and not destination.endswith("/__init__.py")
+    ]
 
     return dedent(
         f"""
@@ -83,6 +96,7 @@ def build_guest_ida_plugin_install_script(
         IDA_DIR = {ida_dir!r}
         IDA_EXECUTABLE_CANDIDATES = {list(IDA_EXECUTABLE_CANDIDATES)!r}
         LEGACY_ROOT_SUPPORT_FILES = {list(LEGACY_ROOT_SUPPORT_FILES)!r}
+        SUPPORT_MODULES = {support_modules!r}
         FILES_B64 = {json.dumps(files_b64, ensure_ascii=False, indent=2)!r}
         EXPECTED_SHA256 = {json.dumps(expected_sha256, ensure_ascii=False, indent=2)!r}
 
@@ -175,15 +189,9 @@ def build_guest_ida_plugin_install_script(
                     "sha256": digest,
                 }}
 
-            support_modules = [
-                "ida_script_mcp_support.protocol",
-                "ida_script_mcp_support.execution",
-                "ida_script_mcp_support.change_protocol",
-                "ida_script_mcp_support.change_recorder",
-            ]
             sys.path.insert(0, str(plugin_dir))
             imported_support = []
-            for module_name in support_modules:
+            for module_name in SUPPORT_MODULES:
                 __import__(module_name)
                 imported_support.append(module_name)
 
