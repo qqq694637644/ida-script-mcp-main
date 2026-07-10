@@ -1,24 +1,6 @@
 ---
 name: idapython
-description: Use for IDAPython scripting, live IDA database analysis, Hex-Rays decompilation, functions, xrefs, names, types, patches, and IDB automation through the ida_skill GPT Actions runtime.
-aliases:
-  - IDA
-  - IDA Python
-  - IDA 脚本
-  - IDAPython 脚本
-keywords:
-  - 反编译
-  - 伪代码
-  - 交叉引用
-  - 函数
-  - 地址
-  - 重命名
-  - 批量重命名
-  - 补丁
-  - 类型
-  - 字节
-  - Hex-Rays
-  - xref
+description: Use for IDAPython scripting, live IDA database analysis, Hex-Rays decompilation, functions, xrefs, names, types, patches, and IDB automation through the ida_skill GPT Actions runtime. 中文：用于 IDA/IDAPython 脚本、Hex-Rays 反编译、伪代码、交叉引用、函数分析、重命名、补丁、类型与 IDB 自动化。
 ---
 
 # IDAPython for GPT-5.6 Sol
