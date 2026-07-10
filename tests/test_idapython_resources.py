@@ -53,6 +53,12 @@ def test_idapython_is_a_single_entrypoint_progressive_disclosure_skill() -> None
         "requested scope",
         "ida_auto.auto_wait()",
         "64-bit",
+        "aliases:",
+        "keywords:",
+        "IDA 脚本",
+        "反编译",
+        "交叉引用",
+        "批量重命名",
     ]
     for term in required_terms:
         assert term in skill_text, term
