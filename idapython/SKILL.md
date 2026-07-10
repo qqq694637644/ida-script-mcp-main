@@ -1,11 +1,27 @@
 ---
 name: idapython
-description: IDA Pro Python scripting for reverse engineering. Use when writing IDAPython scripts, analyzing binaries, working with IDA's API for disassembly, decompilation (Hex-Rays), type systems, cross-references, functions, segments, or any IDA database manipulation. Covers ida_* modules (50+), idautils iterators, and common patterns.
+description: GPT Action runtime guidance and IDAPython reference for IDA Pro reverse engineering, live IDB inspection, Hex-Rays decompilation, xrefs, functions, types, patches, and IDB automation.
 ---
 
-# IDAPython
+# IDAPython for GPT Actions
 
-Use modern `ida_*` modules. Avoid legacy `idc` module.
+This skill is for the `ida_skill` GPT Action runtime. Use it after `retrieveSkillContext` selects `idapython`. Treat the selected skill packet, docs, and live IDA Action results as the source of truth.
+
+## GPT Action Runtime Rules
+
+1. This skill is for the `ida_skill` GPT Action runtime, not an MCP client workflow.
+2. Use live IDA Actions for current database facts. Do not guess active IDB state, function names, addresses, xrefs, pseudocode, or execution results.
+3. Use `listIdaInstances` and `getIdaDatabaseInfo` to identify and confirm the target database.
+4. Prefer structured read Actions before writing custom scripts:
+   - `listIdaFunctions`
+   - `decompileIdaFunction`
+   - `getIdaXrefs`
+5. Use `executeIdapython` for custom analysis, bulk processing, renaming, comments, patches, type work, and checks not covered by structured Actions.
+6. After `executeIdapython`, inspect `status`, `stdout`, `stderr`, `result`, and `error` before concluding.
+7. Use Python-native parsing such as `int(value, 0)` for hex or decimal strings when needed.
+8. Do not mention or call unavailable MCP-only helpers, decorators, or sync wrappers from older client workflows.
+9. When `allow_skill_chaining=true` returns multiple `selected_skills`, keep each skill's rules and docs scoped to its own `skill_id`.
+10. `searchSkillDocs` and `readSkillContent` are single-skill calls; pass the exact `skill_id` being investigated.
 
 ## Module Router
 
@@ -127,28 +143,22 @@ ida_auto.auto_wait()  # Block until autoanalysis completes
 | `fl_CF`, `fl_CN`, `fl_JF`, `fl_JN`, `fl_F` | Code xref types |
 | `dr_R`, `dr_W`, `dr_O` | Data xref types |
 
-## Critical Rules
-
-1. **NEVER convert hex/decimal manually** — use `int_convert` MCP tool
-2. **Wait for analysis**: Call `ida_auto.auto_wait()` before reading results
-3. **Thread safety**: IDA SDK calls must run on main thread (use `@idasync`)
-4. **64-bit addresses**: Always assume `ea_t` can be 64-bit
-
 ## Anti-Patterns
 
 | Avoid | Do Instead |
 |-------|------------|
-| `idc.*` functions | Use `ida_*` modules |
-| Hardcoded addresses | Use names, patterns, or xrefs |
-| Manual hex conversion | Use `int_convert` tool |
-| Blocking main thread | Use `execute_sync()` for long ops |
-| Guessing at types | Derive from disassembly/decompilation |
+| `idc.*` functions when a modern module covers the task | Use `ida_*` modules |
+| Hardcoded addresses without validation | Use names, patterns, xrefs, or live database queries |
+| Manual base-specific address parsing | Use Python-native `int(value, 0)` |
+| Guessing current IDB state | Use live IDA Actions |
+| Guessing at types | Derive from disassembly, decompilation, or type information |
 
 ## Detailed API Reference
 
 For comprehensive documentation on any module, read `docs/<module>.md`:
+
 - **High-use**: `ida_bytes`, `ida_funcs`, `ida_hexrays`, `ida_typeinf`, `ida_name`, `idautils`
 - **Medium-use**: `ida_segment`, `ida_xref`, `ida_ua`, `ida_frame`, `ida_kernwin`
 - **Specialized**: `ida_dbg` (debugger), `ida_nalt` (netnode storage), `ida_regfinder` (register tracking)
 
-Full RST sources from hex-rays.com available at `docs/<module>.rst`.
+Full RST sources from hex-rays.com are available at `docs/<module>.rst`.

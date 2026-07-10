@@ -23,6 +23,8 @@ def _resource_root() -> Path:
 def test_idapython_resource_has_skill_metadata() -> None:
     root = _resource_root()
     metadata = json.loads((root / "skill.json").read_text(encoding="utf-8"))
+    skill_text = (root / "SKILL.md").read_text(encoding="utf-8")
+    index_text = (root / "INDEX.md").read_text(encoding="utf-8")
 
     assert metadata["skill_id"] == "idapython"
     assert metadata["entrypoint"] == "SKILL.md"
@@ -30,6 +32,9 @@ def test_idapython_resource_has_skill_metadata() -> None:
     assert "@idapython" in metadata["aliases"]
     assert "executeIdapython" in metadata["recommended_tools"]
     assert metadata["policy"]["allow_execute_idapython"] is True
+    assert metadata["policy"]["gpt_action_framework"] is True
+    assert metadata["policy"]["mcp_compatibility"] is False
+    assert metadata["policy"]["search_and_read_are_single_skill"] is True
 
     required_paths = ["SKILL.md", "INDEX.md", "docs/idautils.md", "docs/ida_hexrays.md"]
     for relative_path in required_paths:
@@ -37,6 +42,42 @@ def test_idapython_resource_has_skill_metadata() -> None:
 
     for item in metadata["docs"]:
         assert (root / item["path"]).is_file(), item["path"]
+
+    required_terms = [
+        "retrieveSkillContext",
+        "searchSkillDocs",
+        "readSkillContent",
+        "listIdaInstances",
+        "getIdaDatabaseInfo",
+        "listIdaFunctions",
+        "decompileIdaFunction",
+        "getIdaXrefs",
+        "executeIdapython",
+        "selected_skills",
+        "allow_skill_chaining",
+        "status",
+        "stdout",
+        "stderr",
+        "result",
+        "error",
+    ]
+    combined_text = "\n".join(
+        [
+            skill_text,
+            index_text,
+            json.dumps(metadata, ensure_ascii=False),
+        ]
+    )
+    for term in required_terms:
+        assert term in combined_text, term
+
+    forbidden_mcp_only_terms = [
+        "int_convert MCP tool",
+        "@idasync",
+        "execute_sync()",
+    ]
+    for term in forbidden_mcp_only_terms:
+        assert term not in combined_text, term
 
 
 def test_root_idapython_metadata_matches_packaged_resource() -> None:
@@ -47,4 +88,7 @@ def test_root_idapython_metadata_matches_packaged_resource() -> None:
     assert root_metadata == resource_metadata
     assert (repo_root / "idapython" / "INDEX.md").read_text(encoding="utf-8") == (
         _resource_root() / "INDEX.md"
+    ).read_text(encoding="utf-8")
+    assert (repo_root / "idapython" / "SKILL.md").read_text(encoding="utf-8") == (
+        _resource_root() / "SKILL.md"
     ).read_text(encoding="utf-8")
