@@ -1,9 +1,9 @@
-"""Tests for packaged IDAPython skill metadata resources."""
+"""Contract tests for the packaged IDAPython skill resources."""
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -20,33 +20,18 @@ def _resource_root() -> Path:
     )
 
 
-def test_idapython_resource_has_skill_metadata() -> None:
+def test_idapython_is_a_single_entrypoint_progressive_disclosure_skill() -> None:
     root = _resource_root()
-    metadata = json.loads((root / "skill.json").read_text(encoding="utf-8"))
-    skill_text = (root / "SKILL.md").read_text(encoding="utf-8")
-    index_text = (root / "INDEX.md").read_text(encoding="utf-8")
+    skill_path = root / "SKILL.md"
+    skill_text = skill_path.read_text(encoding="utf-8")
 
-    assert metadata["skill_id"] == "idapython"
-    assert metadata["entrypoint"] == "SKILL.md"
-    assert metadata["index"] == "INDEX.md"
-    assert "@idapython" in metadata["aliases"]
-    assert "executeIdapython" in metadata["recommended_tools"]
-    assert metadata["policy"]["target_model"] == "gpt-5.6-sol"
-    assert metadata["policy"]["allow_executeIdapython"] is True
-    assert metadata["policy"]["gpt_action_framework"] is True
-    assert metadata["policy"]["search_and_read_are_single_skill"] is True
-    assert metadata["policy"]["inspect_execute_result_fields"] is True
-    assert "GPT-5.6 Sol" in skill_text
-    assert "GPT-5.6 Sol" in index_text
-    assert len(skill_text.splitlines()) < 130
-    assert len(index_text.splitlines()) < 40
-
-    required_paths = ["SKILL.md", "INDEX.md", "docs/idautils.md", "docs/ida_hexrays.md"]
-    for relative_path in required_paths:
-        assert (root / relative_path).is_file(), relative_path
-
-    for item in metadata["docs"]:
-        assert (root / item["path"]).is_file(), item["path"]
+    assert skill_path.is_file()
+    assert not (root / "skill.json").exists()
+    assert not (root / "INDEX.md").exists()
+    assert skill_text.startswith("---\nname: idapython\ndescription:")
+    assert "# IDAPython for GPT-5.6 Sol" in skill_text
+    assert "## Progressive disclosure" in skill_text
+    assert len(skill_text.splitlines()) < 100
 
     required_terms = [
         "retrieveSkillContext",
@@ -59,44 +44,42 @@ def test_idapython_resource_has_skill_metadata() -> None:
         "getIdaXrefs",
         "executeIdapython",
         "selected_skills",
-        "allow_skill_chaining",
+        "skill_id",
         "status",
         "stdout",
         "stderr",
         "result",
         "error",
+        "ida_auto.auto_wait()",
+        "64-bit",
     ]
-    combined_text = "\n".join(
-        [
-            skill_text,
-            index_text,
-            json.dumps(metadata, ensure_ascii=False),
-        ]
-    )
     for term in required_terms:
-        assert term in combined_text, term
+        assert term in skill_text, term
 
     forbidden_terms = [
-        "int_convert MCP tool",
-        "@idasync",
-        "execute_sync()",
+        "skill.json",
+        "INDEX.md",
         "execute_idapython",
         "MCP tool",
         "MCP client",
+        "@idasync",
+        "execute_sync()",
+        "int_convert MCP tool",
     ]
     for term in forbidden_terms:
-        assert term not in combined_text, term
+        assert term not in skill_text, term
+
+    referenced_paths = set(re.findall(r"`(docs/[^`]+\.(?:md|rst))`", skill_text))
+    assert referenced_paths
+    for relative_path in referenced_paths:
+        assert (root / relative_path).is_file(), relative_path
 
 
-def test_root_idapython_metadata_matches_packaged_resource() -> None:
+def test_root_skill_matches_packaged_resource() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    root_metadata = json.loads((repo_root / "idapython" / "skill.json").read_text(encoding="utf-8"))
-    resource_metadata = json.loads((_resource_root() / "skill.json").read_text(encoding="utf-8"))
+    root_skill = repo_root / "idapython" / "SKILL.md"
+    packaged_skill = _resource_root() / "SKILL.md"
 
-    assert root_metadata == resource_metadata
-    assert (repo_root / "idapython" / "INDEX.md").read_text(encoding="utf-8") == (
-        _resource_root() / "INDEX.md"
-    ).read_text(encoding="utf-8")
-    assert (repo_root / "idapython" / "SKILL.md").read_text(encoding="utf-8") == (
-        _resource_root() / "SKILL.md"
-    ).read_text(encoding="utf-8")
+    assert root_skill.read_text(encoding="utf-8") == packaged_skill.read_text(encoding="utf-8")
+    assert not (repo_root / "idapython" / "skill.json").exists()
+    assert not (repo_root / "idapython" / "INDEX.md").exists()

@@ -79,7 +79,6 @@ where = ["src"]
 ida_script_mcp = [
     "py.typed",
     "resources/*.md",
-    "resources/idapython/*.json",
     "resources/idapython/*.md",
     "resources/idapython/docs/*.md",
     "resources/idapython/docs/*.rst",
