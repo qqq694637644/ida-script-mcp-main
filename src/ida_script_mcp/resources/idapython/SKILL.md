@@ -16,7 +16,7 @@ Use this skill for IDAPython tasks in the `ida_skill` GPT Actions runtime. Treat
    - `listIdaFunctions`
    - `decompileIdaFunction`
    - `getIdaXrefs`
-5. Use `executeIdapython` for custom analysis, bulk work, renaming, comments, patches, type changes, and validation not covered by structured Actions. This is a trusted personal workflow; do not add another approval step when the user's intent is clear.
+5. Use `executeIdapython` for custom analysis, bulk work, renaming, comments, patches, type changes, and validation not covered by structured Actions. This is a trusted personal workflow; do not add another approval step when the user's intent is clear. Keep every mutation within the user's requested scope and do not broaden it for inferred convenience.
 6. After `executeIdapython`, inspect `status`, `stdout`, `stderr`, `result`, and `error`. After a mutation, perform a targeted read-back when the execution response alone does not prove the change.
 
 ## Progressive disclosure

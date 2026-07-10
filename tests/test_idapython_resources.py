@@ -50,6 +50,7 @@ def test_idapython_is_a_single_entrypoint_progressive_disclosure_skill() -> None
         "stderr",
         "result",
         "error",
+        "requested scope",
         "ida_auto.auto_wait()",
         "64-bit",
     ]
