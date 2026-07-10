@@ -31,10 +31,15 @@ def test_idapython_resource_has_skill_metadata() -> None:
     assert metadata["index"] == "INDEX.md"
     assert "@idapython" in metadata["aliases"]
     assert "executeIdapython" in metadata["recommended_tools"]
-    assert metadata["policy"]["allow_execute_idapython"] is True
+    assert metadata["policy"]["target_model"] == "gpt-5.6-sol"
+    assert metadata["policy"]["allow_executeIdapython"] is True
     assert metadata["policy"]["gpt_action_framework"] is True
-    assert metadata["policy"]["mcp_compatibility"] is False
     assert metadata["policy"]["search_and_read_are_single_skill"] is True
+    assert metadata["policy"]["inspect_execute_result_fields"] is True
+    assert "GPT-5.6 Sol" in skill_text
+    assert "GPT-5.6 Sol" in index_text
+    assert len(skill_text.splitlines()) < 130
+    assert len(index_text.splitlines()) < 40
 
     required_paths = ["SKILL.md", "INDEX.md", "docs/idautils.md", "docs/ida_hexrays.md"]
     for relative_path in required_paths:
@@ -71,12 +76,15 @@ def test_idapython_resource_has_skill_metadata() -> None:
     for term in required_terms:
         assert term in combined_text, term
 
-    forbidden_mcp_only_terms = [
+    forbidden_terms = [
         "int_convert MCP tool",
         "@idasync",
         "execute_sync()",
+        "execute_idapython",
+        "MCP tool",
+        "MCP client",
     ]
-    for term in forbidden_mcp_only_terms:
+    for term in forbidden_terms:
         assert term not in combined_text, term
 
 

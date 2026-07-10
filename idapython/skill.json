@@ -2,7 +2,7 @@
   "skill_id": "idapython",
   "name": "idapython",
   "version": "2026.07.10",
-  "description": "GPT Action runtime guidance and IDAPython reference for IDA Pro reverse engineering, live IDB inspection, Hex-Rays decompilation, xrefs, functions, segments, types, patches, and IDB automation.",
+  "description": "GPT-5.6 Sol guidance for IDAPython tasks through the ida_skill GPT Actions runtime.",
   "skill_type": "tool_doc",
   "capability_tags": [
     "reverse_engineering",
@@ -10,8 +10,8 @@
     "ida_pro",
     "idapython",
     "hex_rays",
-    "python_scripting",
-    "gpt_actions"
+    "gpt_actions",
+    "gpt_5_6_sol"
   ],
   "domains": [
     "reverse_engineering",
@@ -50,7 +50,6 @@
       "decompile",
       "pseudocode",
       "xrefs",
-      "cross references",
       "functions",
       "segments",
       "types",
@@ -62,15 +61,14 @@
     ]
   },
   "response_contract": {
-    "expected_output": "IDAPython code, IDA analysis guidance, or live IDA GPT Action results grounded in the selected docs and current IDB state.",
+    "expected_output": "IDAPython guidance, code, or verified live IDA results grounded in retrieved docs and Action responses.",
     "must_include": [
-      "Use this skill as GPT Action runtime guidance for IDAPython tasks.",
-      "Use selected skill docs as the source of IDAPython API behavior.",
+      "Use retrieved skill documentation as the source of IDAPython API behavior.",
       "Use live IDA Actions for current database facts instead of guessing.",
       "Prefer listIdaFunctions, decompileIdaFunction, and getIdaXrefs for structured reads.",
-      "Use executeIdapython when custom IDAPython is the fastest path.",
+      "Use executeIdapython when custom IDAPython is the fastest or clearest path.",
       "Inspect executeIdapython status, stdout, stderr, result, and error before concluding.",
-      "Do not use MCP-only helper names, decorators, or sync wrappers from older client workflows."
+      "Distinguish verified live IDA results from documentation-based guidance."
     ],
     "preferred_modules_or_topics": [
       "ida_funcs",
@@ -83,34 +81,35 @@
       "idautils"
     ],
     "must_avoid": [
-      "Do not invent IDAPython APIs not present in the docs.",
-      "Do not assume Hex-Rays decompiler is available without checking failures.",
-      "Do not guess live IDA database state without IDA Action results.",
-      "Do not use unavailable MCP-only helper names or client-only execution wrappers."
+      "Do not invent undocumented IDAPython APIs.",
+      "Do not guess live IDA database state.",
+      "Do not assume Hex-Rays is available when decompilation fails."
     ]
   },
   "validation_guidance": {
     "can_validate": true,
     "suggested_checks": [
-      "Use listIdaInstances to select the target IDA instance.",
-      "Use getIdaDatabaseInfo to confirm the active database.",
-      "Use structured read Actions before writing custom scripts when they cover the task.",
-      "Use executeIdapython for custom checks or mutations and inspect returned status fields."
+      "Use listIdaInstances when the target IDA instance is not already unambiguous.",
+      "Use getIdaDatabaseInfo when architecture, image base, file, or database identity matters.",
+      "Use structured read Actions when they directly cover the required observation.",
+      "Use executeIdapython for custom validation or mutation and inspect all result fields.",
+      "After a mutation, perform a targeted read-back when the execution response alone does not prove the change."
     ],
     "failure_behavior": [
-      "If no IDA instance is available, ask the user to start IDA Pro and enable the IDA-Script-MCP plugin.",
-      "If multiple IDA instances are open, ask for or pass a specific instance_id or port.",
-      "If decompilation fails, fall back to disassembly or function/xref metadata.",
-      "If executeIdapython returns timeout, plugin_response_timeout, busy, or error, report the status and do not assume changes completed."
+      "If no IDA instance is available, ask the user to start IDA Pro and enable the local IDA plugin.",
+      "If multiple instances are available and the target is unclear, request or pass a specific instance_id or port.",
+      "If decompilation fails, use function, xref, disassembly, or custom validation evidence instead.",
+      "If executeIdapython returns timeout, plugin_response_timeout, busy, or error, report that status and do not assume completion."
     ]
   },
   "policy": {
+    "target_model": "gpt-5.6-sol",
     "gpt_action_framework": true,
-    "mcp_compatibility": false,
     "prefer_structured_reads_first": true,
-    "allow_execute_idapython": true,
+    "allow_executeIdapython": true,
     "personal_use_non_consequential_actions": true,
-    "search_and_read_are_single_skill": true
+    "search_and_read_are_single_skill": true,
+    "inspect_execute_result_fields": true
   },
   "recommended_tools": [
     "retrieveSkillContext",
@@ -124,9 +123,8 @@
     "executeIdapython"
   ],
   "docs": [
-    {"path": "INDEX.md", "title": "IDAPython GPT Action index", "tags": ["index", "gpt_actions"], "priority": 30},
+    {"path": "INDEX.md", "title": "IDAPython Skill Index for GPT-5.6 Sol", "tags": ["index", "gpt_actions"], "priority": 30},
     {"path": "docs/idautils.md", "title": "idautils", "tags": ["functions", "xrefs", "iterators"], "priority": 25},
-    {"path": "docs/idc.md", "title": "idc", "tags": ["legacy", "names", "types", "comments"], "priority": 20},
     {"path": "docs/ida_funcs.md", "title": "ida_funcs", "tags": ["functions", "boundaries", "flags"], "priority": 25},
     {"path": "docs/ida_xref.md", "title": "ida_xref", "tags": ["xrefs", "references"], "priority": 25},
     {"path": "docs/ida_hexrays.md", "title": "ida_hexrays", "tags": ["decompiler", "ctree", "pseudocode"], "priority": 25},

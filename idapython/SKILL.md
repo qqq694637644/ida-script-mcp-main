@@ -1,164 +1,98 @@
 ---
 name: idapython
-description: GPT Action runtime guidance and IDAPython reference for IDA Pro reverse engineering, live IDB inspection, Hex-Rays decompilation, xrefs, functions, types, patches, and IDB automation.
+description: GPT-5.6 Sol guidance for IDAPython tasks through the ida_skill GPT Actions runtime.
 ---
 
-# IDAPython for GPT Actions
+# IDAPython Skill for GPT-5.6 Sol
 
-This skill is for the `ida_skill` GPT Action runtime. Use it after `retrieveSkillContext` selects `idapython`. Treat the selected skill packet, docs, and live IDA Action results as the source of truth.
+Use this skill after `retrieveSkillContext` selects `idapython`. Retrieved skill rules, selected docs, and live IDA Action results are the evidence for the answer.
 
-## GPT Action Runtime Rules
+## Runtime rules
 
-1. This skill is for the `ida_skill` GPT Action runtime, not an MCP client workflow.
-2. Use live IDA Actions for current database facts. Do not guess active IDB state, function names, addresses, xrefs, pseudocode, or execution results.
-3. Use `listIdaInstances` and `getIdaDatabaseInfo` to identify and confirm the target database.
-4. Prefer structured read Actions before writing custom scripts:
-   - `listIdaFunctions`
-   - `decompileIdaFunction`
-   - `getIdaXrefs`
-5. Use `executeIdapython` for custom analysis, bulk processing, renaming, comments, patches, type work, and checks not covered by structured Actions.
-6. After `executeIdapython`, inspect `status`, `stdout`, `stderr`, `result`, and `error` before concluding.
-7. Use Python-native parsing such as `int(value, 0)` for hex or decimal strings when needed.
-8. Do not mention or call unavailable MCP-only helpers, decorators, or sync wrappers from older client workflows.
-9. When `allow_skill_chaining=true` returns multiple `selected_skills`, keep each skill's rules and docs scoped to its own `skill_id`.
-10. `searchSkillDocs` and `readSkillContent` are single-skill calls; pass the exact `skill_id` being investigated.
+1. `retrieveSkillContext` is the normal entry point. After this skill is selected, do not repeat retrieval unless a concrete documentation gap remains.
+2. Use retrieved docs as the source of IDAPython API behavior. Do not invent undocumented APIs.
+3. Obtain current IDB facts through live IDA Actions; do not guess database identity, addresses, functions, xrefs, pseudocode, or execution results.
+4. Use `listIdaInstances` when the target instance is not unambiguous. Use `getIdaDatabaseInfo` when database identity, architecture, image base, or file details matter.
+5. Prefer direct structured reads when they cover the observation: `listIdaFunctions`, `decompileIdaFunction`, and `getIdaXrefs`.
+6. Use `executeIdapython` for custom analysis, bulk processing, renaming, comments, patches, type changes, or validation scripts. In this personal workflow, do not add an extra approval step when the user's intent is clear.
+7. After `executeIdapython`, inspect `status`, `stdout`, `stderr`, `result`, and `error`. After a mutation, perform a targeted read-back when the response alone does not prove the change.
+8. When `allow_skill_chaining=true` returns multiple `selected_skills`, keep each skill scoped to its own `skill_id`. `searchSkillDocs` and `readSkillContent` operate on one explicit `skill_id` at a time.
 
-## Module Router
+## IDAPython rules
 
-| Task | Module | Key Items |
-|------|--------|-----------|
-| Bytes/memory | `ida_bytes` | `get_bytes`, `patch_bytes`, `get_flags`, `create_*` |
-| Functions | `ida_funcs` | `func_t`, `get_func`, `add_func`, `get_func_name` |
-| Names | `ida_name` | `set_name`, `get_name`, `demangle_name` |
-| Types | `ida_typeinf` | `tinfo_t`, `apply_tinfo`, `parse_decl` |
-| Decompiler | `ida_hexrays` | `decompile`, `cfunc_t`, `lvar_t`, ctree visitor |
-| Segments | `ida_segment` | `segment_t`, `getseg`, `add_segm` |
-| Xrefs | `ida_xref` | `xrefblk_t`, `add_cref`, `add_dref` |
-| Instructions | `ida_ua` | `insn_t`, `op_t`, `decode_insn` |
-| Stack frames | `ida_frame` | `get_frame`, `define_stkvar` |
-| Iteration | `idautils` | `Functions()`, `Heads()`, `XrefsTo()`, `Strings()` |
-| UI/dialogs | `ida_kernwin` | `msg`, `ask_*`, `jumpto`, `Choose` |
-| Database info | `ida_ida` | `inf_get_*`, `inf_is_64bit()` |
+- Prefer modern `ida_*` modules when practical and include required imports.
+- Call `ida_auto.auto_wait()` before relying on auto-analysis results.
+- Assume `ea_t` may contain 64-bit addresses.
+- Parse user-supplied hex or decimal strings with `int(value, 0)` when needed.
+- Handle unavailable Hex-Rays or decompilation failure explicitly.
+- Validate hardcoded addresses against the live database before use.
+
+## Module router
+
+| Task | Module | Common APIs |
+|---|---|---|
+| Bytes and patches | `ida_bytes` | `get_bytes`, `patch_bytes`, `get_flags` |
+| Functions | `ida_funcs` | `get_func`, `get_func_name`, `add_func` |
+| Names | `ida_name` | `get_name`, `set_name`, `demangle_name` |
+| Types | `ida_typeinf` | `tinfo_t`, `parse_decl`, `apply_tinfo` |
+| Decompiler | `ida_hexrays` | `decompile`, `cfunc_t`, ctree visitors |
+| Xrefs | `ida_xref`, `idautils` | `xrefblk_t`, `XrefsTo`, `XrefsFrom` |
+| Iteration | `idautils` | `Functions`, `FuncItems`, `Strings` |
+| Database info | `ida_ida` | `inf_get_*`, `inf_is_64bit` |
 | Analysis | `ida_auto` | `auto_wait`, `plan_and_wait` |
-| Flow graphs | `ida_gdl` | `FlowChart`, `BasicBlock` |
-| Register tracking | `ida_regfinder` | `find_reg_value`, `reg_value_info_t` |
 
-## Core Patterns
+## Core patterns
 
-### Iterate functions
+### Functions
+
 ```python
+import ida_funcs
+import idautils
+
 for ea in idautils.Functions():
-    name = ida_funcs.get_func_name(ea)
     func = ida_funcs.get_func(ea)
+    name = ida_funcs.get_func_name(ea)
 ```
 
-### Iterate instructions in function
-```python
-for head in idautils.FuncItems(func_ea):
-    insn = ida_ua.insn_t()
-    if ida_ua.decode_insn(insn, head):
-        print(f"{head:#x}: {insn.itype}")
-```
+### Xrefs
 
-### Cross-references
 ```python
+import idautils
+
 for xref in idautils.XrefsTo(ea):
     print(f"{xref.frm:#x} -> {xref.to:#x} type={xref.type}")
 ```
 
-### Read/write bytes
+### Decompile
+
 ```python
+import ida_hexrays
+
+cfunc = ida_hexrays.decompile(ea)
+if cfunc is None:
+    raise RuntimeError(f"decompilation failed at {ea:#x}")
+print(cfunc)
+```
+
+### Read or patch bytes
+
+```python
+import ida_bytes
+
 data = ida_bytes.get_bytes(ea, size)
 ida_bytes.patch_bytes(ea, b"\x90\x90")
 ```
 
-### Names
-```python
-name = ida_name.get_name(ea)
-ida_name.set_name(ea, "new_name", ida_name.SN_NOCHECK)
-```
+### Apply a type
 
-### Decompile function
 ```python
-cfunc = ida_hexrays.decompile(ea)
-if cfunc:
-    print(cfunc)  # pseudocode
-    for lvar in cfunc.lvars:
-        print(f"{lvar.name}: {lvar.type()}")
-```
+import ida_typeinf
 
-### Walk ctree (decompiled AST)
-```python
-class MyVisitor(ida_hexrays.ctree_visitor_t):
-    def visit_expr(self, e):
-        if e.op == ida_hexrays.cot_call:
-            print(f"Call at {e.ea:#x}")
-        return 0
-
-cfunc = ida_hexrays.decompile(ea)
-MyVisitor().apply_to(cfunc.body, None)
-```
-
-### Apply type
-```python
 tif = ida_typeinf.tinfo_t()
 if ida_typeinf.parse_decl(tif, None, "int (*)(char *, int)", 0):
     ida_typeinf.apply_tinfo(ea, tif, ida_typeinf.TINFO_DEFINITE)
 ```
 
-### Create structure
-```python
-udt = ida_typeinf.udt_type_data_t()
-m = ida_typeinf.udm_t()
-m.name = "field1"
-m.type = ida_typeinf.tinfo_t(ida_typeinf.BTF_INT32)
-m.offset = 0
-m.size = 4
-udt.push_back(m)
-tif = ida_typeinf.tinfo_t()
-tif.create_udt(udt, ida_typeinf.BTF_STRUCT)
-tif.set_named_type(ida_typeinf.get_idati(), "MyStruct")
-```
+## Documentation
 
-### Strings list
-```python
-for s in idautils.Strings():
-    print(f"{s.ea:#x}: {str(s)}")
-```
-
-### Wait for analysis
-```python
-ida_auto.auto_wait()  # Block until autoanalysis completes
-```
-
-## Key Constants
-
-| Constant | Value/Use |
-|----------|-----------|
-| `BADADDR` | Invalid address sentinel |
-| `ida_name.SN_NOCHECK` | Skip name validation |
-| `ida_typeinf.TINFO_DEFINITE` | Force type application |
-| `o_reg`, `o_mem`, `o_imm`, `o_displ`, `o_near` | Operand types |
-| `dt_byte`, `dt_word`, `dt_dword`, `dt_qword` | Data types |
-| `fl_CF`, `fl_CN`, `fl_JF`, `fl_JN`, `fl_F` | Code xref types |
-| `dr_R`, `dr_W`, `dr_O` | Data xref types |
-
-## Anti-Patterns
-
-| Avoid | Do Instead |
-|-------|------------|
-| `idc.*` functions when a modern module covers the task | Use `ida_*` modules |
-| Hardcoded addresses without validation | Use names, patterns, xrefs, or live database queries |
-| Manual base-specific address parsing | Use Python-native `int(value, 0)` |
-| Guessing current IDB state | Use live IDA Actions |
-| Guessing at types | Derive from disassembly, decompilation, or type information |
-
-## Detailed API Reference
-
-For comprehensive documentation on any module, read `docs/<module>.md`:
-
-- **High-use**: `ida_bytes`, `ida_funcs`, `ida_hexrays`, `ida_typeinf`, `ida_name`, `idautils`
-- **Medium-use**: `ida_segment`, `ida_xref`, `ida_ua`, `ida_frame`, `ida_kernwin`
-- **Specialized**: `ida_dbg` (debugger), `ida_nalt` (netnode storage), `ida_regfinder` (register tracking)
-
-Full RST sources from hex-rays.com are available at `docs/<module>.rst`.
+Use `INDEX.md` for the shortest Action route and documentation map. Read `docs/<module>.md` for focused API guidance; use `docs/<module>.rst` only when the Markdown summary is insufficient.
