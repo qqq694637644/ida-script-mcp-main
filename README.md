@@ -240,8 +240,11 @@ ida_script_mcp/resources/idapython/
 
 其中包括：
 
+- `skill.json`
 - `SKILL.md`
+- `INDEX.md`
 - `docs/*.md`
+- `docs/*.rst`
 
 这些文档适合给本地 AI 助手作为 IDA API 参考资料，帮助模型更准确地使用 IDAPython。
 

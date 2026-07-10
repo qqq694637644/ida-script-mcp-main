@@ -1,0 +1,126 @@
+{
+  "skill_id": "idapython",
+  "name": "idapython",
+  "version": "2026.07.10",
+  "description": "IDA Pro Python scripting for reverse engineering, binary analysis, Hex-Rays decompilation, xrefs, functions, segments, types, patches, and IDB automation.",
+  "skill_type": "tool_doc",
+  "capability_tags": [
+    "reverse_engineering",
+    "binary_analysis",
+    "ida_pro",
+    "idapython",
+    "hex_rays",
+    "python_scripting"
+  ],
+  "domains": [
+    "reverse_engineering",
+    "binary_analysis",
+    "malware_analysis"
+  ],
+  "conflicts_with": [
+    "ghidra",
+    "binary_ninja"
+  ],
+  "can_chain_with": [
+    "malware_analysis",
+    "yara",
+    "windows_reverse_engineering"
+  ],
+  "aliases": [
+    "@idapython",
+    "idapython",
+    "IDA",
+    "IDA Pro",
+    "Hex-Rays",
+    "idaapi",
+    "idautils",
+    "idc"
+  ],
+  "entrypoint": "SKILL.md",
+  "index": "INDEX.md",
+  "activation": {
+    "trigger_terms": [
+      "idapython",
+      "ida_*",
+      "idaapi",
+      "idautils",
+      "idc",
+      "Hex-Rays",
+      "decompile",
+      "pseudocode",
+      "xrefs",
+      "cross references",
+      "functions",
+      "segments",
+      "types",
+      "ctree",
+      "IDB",
+      "patch bytes",
+      "rename function"
+    ]
+  },
+  "response_contract": {
+    "expected_output": "IDAPython code, IDA analysis guidance, or live IDA operation results grounded in the selected docs.",
+    "must_include": [
+      "Use modern ida_* modules when practical.",
+      "Mention required imports used by generated scripts.",
+      "Prefer structured IDA Actions for live reads before writing custom IDAPython.",
+      "When generating mutation scripts, make the intended IDB changes explicit."
+    ],
+    "preferred_modules_or_topics": [
+      "ida_funcs",
+      "ida_xref",
+      "ida_hexrays",
+      "ida_bytes",
+      "ida_name",
+      "ida_typeinf",
+      "idautils"
+    ],
+    "must_avoid": [
+      "Do not invent IDAPython APIs not present in the docs.",
+      "Do not assume Hex-Rays decompiler is available without checking failures."
+    ]
+  },
+  "validation_guidance": {
+    "can_validate": true,
+    "suggested_checks": [
+      "Use listIdaInstances and getIdaDatabaseInfo to confirm the target IDB.",
+      "Use listIdaFunctions, decompileIdaFunction, and getIdaXrefs for live read checks.",
+      "For executeIdapython results, inspect status, stdout, stderr, result, and error fields."
+    ],
+    "failure_behavior": [
+      "If multiple IDA instances are open, ask for or pass a specific instance_id or port.",
+      "If decompilation fails, fall back to disassembly or function/xref metadata.",
+      "If executeIdapython returns timeout or busy, report the status and do not assume changes completed."
+    ]
+  },
+  "policy": {
+    "prefer_structured_reads_first": true,
+    "allow_execute_idapython": true,
+    "personal_use_non_consequential_actions": true
+  },
+  "recommended_tools": [
+    "retrieveSkillContext",
+    "searchSkillDocs",
+    "readSkillContent",
+    "listIdaInstances",
+    "getIdaDatabaseInfo",
+    "listIdaFunctions",
+    "decompileIdaFunction",
+    "getIdaXrefs",
+    "executeIdapython"
+  ],
+  "docs": [
+    {"path": "INDEX.md", "title": "IDAPython documentation index", "tags": ["index"], "priority": 30},
+    {"path": "docs/idautils.md", "title": "idautils", "tags": ["functions", "xrefs", "iterators"], "priority": 25},
+    {"path": "docs/idc.md", "title": "idc", "tags": ["legacy", "names", "types", "comments"], "priority": 20},
+    {"path": "docs/ida_funcs.md", "title": "ida_funcs", "tags": ["functions", "boundaries", "flags"], "priority": 25},
+    {"path": "docs/ida_xref.md", "title": "ida_xref", "tags": ["xrefs", "references"], "priority": 25},
+    {"path": "docs/ida_hexrays.md", "title": "ida_hexrays", "tags": ["decompiler", "ctree", "pseudocode"], "priority": 25},
+    {"path": "docs/ida_bytes.md", "title": "ida_bytes", "tags": ["patching", "bytes", "data"], "priority": 20},
+    {"path": "docs/ida_name.md", "title": "ida_name", "tags": ["names", "symbols", "renaming"], "priority": 20},
+    {"path": "docs/ida_typeinf.md", "title": "ida_typeinf", "tags": ["types", "tinfo", "structs"], "priority": 20},
+    {"path": "docs/ida_segment.md", "title": "ida_segment", "tags": ["segments", "memory"], "priority": 15},
+    {"path": "docs/ida_auto.md", "title": "ida_auto", "tags": ["analysis", "autoanalysis"], "priority": 15}
+  ]
+}
