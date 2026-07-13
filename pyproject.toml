@@ -81,6 +81,7 @@ ida_script_mcp = [
     "resources/*.md",
     "resources/idapython/*.md",
     "resources/idapython/docs/*.md",
+    "resources/idapython/docs/*.rst",
 ]
 
 [tool.pyright]

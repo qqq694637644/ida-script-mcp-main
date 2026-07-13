@@ -4,4 +4,4 @@ include pyproject.toml
 include src/ida_script_mcp/py.typed
 
 recursive-include src *.py
-recursive-include src/ida_script_mcp/resources *.md
+recursive-include src/ida_script_mcp/resources *.md *.rst

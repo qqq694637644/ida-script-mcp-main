@@ -242,8 +242,11 @@ ida_script_mcp/resources/idapython/
 
 - `SKILL.md`
 - `docs/*.md`
+- `docs/*.rst`
 
-这些文档适合给本地 AI 助手作为 IDA API 参考资料，帮助模型更准确地使用 IDAPython。
+`SKILL.md` 是唯一入口，frontmatter 提供 `name` 和 `description`。模型选中
+skill 后完整读取 `SKILL.md`，再按其中的路由说明渐进式读取所需的
+`docs/*.md`；不需要单独维护索引或 JSON metadata。
 
 ## 安全说明
 
